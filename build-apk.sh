@@ -13,7 +13,7 @@ SRC="$HERE/app/src/main"
 sed 's|<manifest |<manifest package="com.ampylink.app" |' "$SRC/AndroidManifest.xml" > "$OUT/AndroidManifest.xml"
 "$AAPT2" compile --dir "$SRC/res" -o "$OUT/res/res.zip"
 "$AAPT2" link -o "$OUT/base.apk" -I "$SDK_JAR" --manifest "$OUT/AndroidManifest.xml" \
-  --java "$OUT/gen" --min-sdk-version 30 --target-sdk-version 34 --version-code 2 --version-name 1.0.1 "$OUT/res/res.zip"
+  --java "$OUT/gen" --min-sdk-version 30 --target-sdk-version 34 --version-code 3 --version-name 1.0.2 "$OUT/res/res.zip"
 javac -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$SDK_JAR:$LAMBDA_STUBS" -d "$OUT/classes" \
   $(find "$SRC/java" "$OUT/gen" -name '*.java')
 python3 -I "$HERE/tools/strip_methodparams.py" "$OUT/classes"

@@ -305,7 +305,10 @@ final class PrintSheet {
         printerLabel.setTextColor(mac == null ? Cyber.DIM : Cyber.TEXT);
     }
 
-    private boolean ensureBt() {
+    private boolean ensureBt() { return ensureBt(a); }
+
+    /** Bluetooth permissions + adapter on; asks and returns false if something is missing. */
+    static boolean ensureBt(Activity a) {
         BluetoothAdapter ad = KodakBt.adapter(a);
         if (ad == null) { Toast.makeText(a, "Bluetooth non disponibile", Toast.LENGTH_LONG).show(); return false; }
         if (Build.VERSION.SDK_INT >= 31) {

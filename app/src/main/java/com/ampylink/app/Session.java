@@ -313,9 +313,18 @@ final class Session {
         return s;
     }
 
+    /** Bluetooth link to the camera and the camera-AP network request (BLE handover). */
+    static volatile CanonBle ble;
+    static volatile android.net.ConnectivityManager.NetworkCallback netCb;
+    static volatile Context appCtx;
+
     static void disconnect() {
         final CanonClient c = client;
         client = null;
         if (c != null) camIo.execute(c::close);
+        CanonBle b = ble; ble = null;
+        if (b != null) b.close();
+        android.net.ConnectivityManager.NetworkCallback n = netCb; netCb = null;
+        if (n != null && appCtx != null) try { appCtx.getSystemService(android.net.ConnectivityManager.class).unregisterNetworkCallback(n); } catch (Exception ignored) {}
     }
 }

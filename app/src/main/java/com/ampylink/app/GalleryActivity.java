@@ -77,6 +77,7 @@ public final class GalleryActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Session.appCtx = getApplicationContext();
         sp = getSharedPreferences("eos", MODE_PRIVATE);
         cols = sp.getInt("cols", 3);
         buildUi();
@@ -476,10 +477,37 @@ public final class GalleryActivity extends Activity {
             rebuild();
             return;
         }
-        Object[] dv = Neon.dialog(this, "EOS // WIFI LINK", true);
+        Object[] dv = Neon.dialog(this, "EOS // LINK", true);
         Dialog d = (Dialog) dv[0];
         LinearLayout root = (LinearLayout) dv[1];
         int pad = pad();
+        // ---- Bluetooth (Camera Connect style): pair, wake the camera, start its Wi-Fi, auto-join
+        root.addView(Cyber.label(this, "◉ BLUETOOTH", 11, Cyber.MAGENTA));
+        root.addView(Neon.caption(this,
+            "Come Camera Connect. Sulla R6 II apri il menu della connessione allo smartphone, scegli di aggiungere un dispositivo Android e lascia la fotocamera in attesa. " +
+            "AmpyLink associa la fotocamera via Bluetooth, le fa accendere il Wi-Fi e si collega da sola (Android chiede conferma per la rete EOS).", 9));
+        String btMac = sp.getString("ble_mac", null), btName = sp.getString("ble_name", "EOS");
+        if (btMac != null) {
+            TextView again = Cyber.button(this, "▶ RICOLLEGA " + btName + " VIA BLUETOOTH", Cyber.MAGENTA);
+            again.setOnClickListener(v -> {
+                if (!PrintSheet.ensureBt(this)) return;
+                d.dismiss();
+                try { bleLink(KodakBt.adapter(this).getRemoteDevice(btMac), btName); } catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
+            });
+            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, -2);
+            alp.topMargin = pad / 2;
+            root.addView(again, alp);
+        }
+        TextView bleScan = Cyber.button(this, "CERCA FOTOCAMERA VIA BLUETOOTH", Cyber.CYAN);
+        bleScan.setOnClickListener(v -> { if (PrintSheet.ensureBt(this)) { d.dismiss(); bleScanDialog(); } });
+        LinearLayout.LayoutParams blp2 = new LinearLayout.LayoutParams(-1, -2);
+        blp2.topMargin = pad / 2;
+        root.addView(bleScan, blp2);
+        View sepr = Neon.rule(this);
+        ((LinearLayout.LayoutParams) sepr.getLayoutParams()).topMargin = pad;
+        ((LinearLayout.LayoutParams) sepr.getLayoutParams()).bottomMargin = pad / 2;
+        root.addView(sepr);
+        root.addView(Cyber.label(this, "◉ WI-FI", 11, Cyber.CYAN));
         root.addView(Neon.caption(this,
             "EOS R6 Mark II, come Canon Camera Connect:\n" +
             "1 · Sulla fotocamera: MENU › Rete › Connetti a smartphone (Wi-Fi). Se chiede l'app, scegli connessione Wi-Fi senza Bluetooth.\n" +
@@ -533,10 +561,10 @@ public final class GalleryActivity extends Activity {
             s.setPadding(0, pad / 2, 0, 0);
             found.addView(s);
             new Thread(() -> {
-                List<Discovery.Found> fl = Discovery.scan(this, wifiNetwork(), 3500);
+                List<Discovery.Found> fl = Discovery.scan(this, wifiNetwork(), 3500, ip.getText().toString());
                 ui.post(() -> {
                     found.removeAllViews();
-                    if (fl.isEmpty()) { TextView t = Neon.caption(this, "Nessuna Canon trovata: verifica il Wi-Fi o inserisci l'IP.", 9); t.setPadding(0, pad / 2, 0, 0); found.addView(t); }
+                    if (fl.isEmpty()) { TextView t = Neon.caption(this, "Nessuna risposta dalla fotocamera. Controlla che sul display sia attiva la connessione allo smartphone (in attesa), poi tocca COLLEGA con l'IP " + ip.getText() + " e modalità PTP/IP.", 9); t.setPadding(0, pad / 2, 0, 0); found.addView(t); }
                     for (Discovery.Found f : fl) {
                         TextView t = Cyber.button(this, "▣ " + f.label(), Cyber.MAGENTA);
                         t.setGravity(Gravity.START);
@@ -561,6 +589,79 @@ public final class GalleryActivity extends Activity {
         d.show();
     }
 
+    // ------------------------------------------------------------------ Bluetooth link
+
+    private void bleScanDialog() {
+        Object[] dv = Neon.dialog(this, "EOS // BLUETOOTH", true);
+        Dialog d = (Dialog) dv[0];
+        LinearLayout root = (LinearLayout) dv[1];
+        int pad = pad();
+        TextView state = Neon.caption(this, "RICERCA FOTOCAMERE CANON… (fotocamera in attesa di associazione)", 9);
+        root.addView(state);
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        root.addView(rows);
+        final java.util.Set<String> seen = new java.util.HashSet<>();
+        final Runnable[] stop = {null};
+        stop[0] = CanonBle.scan(this, (dev, name, rssi) -> ui.post(() -> {
+            if (!seen.add(dev.getAddress())) return;
+            TextView t = Cyber.button(this, "▣ " + name + "\n" + dev.getAddress() + " · " + rssi + " dBm", Cyber.MAGENTA);
+            t.setGravity(Gravity.START);
+            t.setOnClickListener(v -> { if (stop[0] != null) stop[0].run(); d.dismiss(); bleLink(dev, name); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = pad / 2;
+            rows.addView(t, lp);
+            state.setText("TOCCA LA FOTOCAMERA PER COLLEGARLA");
+        }));
+        ui.postDelayed(() -> { if (seen.isEmpty() && d.isShowing()) state.setText("Nessuna fotocamera trovata: sulla R6 II avvia l'associazione con lo smartphone (Bluetooth attivo) e resta su quella schermata."); }, 12000);
+        d.setOnDismissListener(x -> { if (stop[0] != null) stop[0].run(); });
+        d.show();
+    }
+
+    /** BLE pairing/handshake → camera starts Wi-Fi AP → Android joins it → PTP/IP over that network. */
+    private void bleLink(android.bluetooth.BluetoothDevice dev, String name) {
+        if (linking) return;
+        linking = true;
+        phoneTab = false;
+        linkBtn.setText("…");
+        rebuild();
+        final boolean first = !dev.getAddress().equals(sp.getString("ble_paired", null));
+        new Thread(() -> {
+            try {
+                CanonBle ble = new CanonBle(this, dev);
+                CanonBle.Ap ap = ble.connectAndStartWifi(first, Session.guid(this), Session.friendlyName(), s -> setStatus("◌ " + s));
+                Session.ble = ble;
+                sp.edit().putString("ble_mac", dev.getAddress()).putString("ble_name", name).putString("ble_paired", dev.getAddress())
+                    .putString("ip", ap.ip).putInt("mode", 1).apply();
+                setStatus("◌ WI-FI " + ap.ssid + " · CONFERMA LA RETE NEL POPUP DI ANDROID…");
+                ui.post(() -> joinAndLink(ap, false));
+            } catch (Exception e) {
+                Session.disconnect();
+                linking = false;
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                ui.post(() -> { rebuild(); statusLine.setText("✕ BLUETOOTH: " + msg); statusLine.setTextColor(Cyber.MAGENTA); });
+            }
+        }, "ble-link").start();
+    }
+
+    private void joinAndLink(CanonBle.Ap ap, boolean wpa3) {
+        Session.netCb = CanonBle.joinWifi(this, ap, wpa3, (net, err) -> {
+            if (net != null) {
+                setStatus("◌ WI-FI " + ap.ssid + " OK · PTP/IP " + ap.ip + "…");
+                ui.post(() -> { linking = false; link(ap.ip, 1, net); });
+            } else if (!wpa3 && ap.security.contains(9)) {
+                ui.post(() -> joinAndLink(ap, true));
+            } else {
+                ui.post(() -> {
+                    linking = false;
+                    rebuild();
+                    statusLine.setText("✕ " + err + " · in alternativa collegati a mano a " + ap.ssid + " (password " + ap.password + ") e usa COLLEGA");
+                    statusLine.setTextColor(Cyber.MAGENTA);
+                });
+            }
+        });
+    }
+
     private static boolean portOpen(Network n, String host, int port) {
         try (Socket s = n != null ? n.getSocketFactory().createSocket() : new Socket()) {
             s.connect(new InetSocketAddress(host, port), 1500);
@@ -568,7 +669,9 @@ public final class GalleryActivity extends Activity {
         } catch (Exception e) { return false; }
     }
 
-    private void link(String host, int mode) {
+    private void link(String host, int mode) { link(host, mode, null); }
+
+    private void link(String host, int mode, Network forced) {
         if (linking) return;
         linking = true;
         phoneTab = false;
@@ -577,12 +680,12 @@ public final class GalleryActivity extends Activity {
         rebuild();
         Session.camIo.execute(() -> {
             try {
-                Network n = wifiNetwork();
+                Network n = forced != null ? forced : wifiNetwork();
                 int m = mode;
                 String h = host;
                 if (m == 0) {
                     setStatus("◌ RICERCA FOTOCAMERA (UPnP)…");
-                    List<Discovery.Found> fl = Discovery.scan(this, n, 2500);
+                    List<Discovery.Found> fl = Discovery.scan(this, n, 2500, h);
                     for (Discovery.Found f : fl) if (f.ip.equals(h) || fl.size() == 1) { h = f.ip; m = f.ccapi && !f.ptpip ? 2 : 1; break; }
                     if (m == 0) m = portOpen(n, h, 15740) ? 1 : portOpen(n, h, 8080) ? 2 : 1;
                 }
@@ -594,15 +697,27 @@ public final class GalleryActivity extends Activity {
                     c = p;
                 }
                 setStatus("◌ " + c.mode() + " · " + h + " · HANDSHAKE…");
-                c.connect();
-                Session.client = c;
-                setStatus("◉ " + c.cameraName + " · LETTURA SCHEDA…");
-                List<CanonClient.Item> items = c.list((done, tot) -> setStatus("◉ " + c.cameraName + " · LETTURA SCHEDA · " + done + " FILE"));
+                // right after a Bluetooth handover the camera AP / PTP/IP server may need a few seconds
+                long until = System.currentTimeMillis() + (forced != null ? 20000 : 0);
+                while (true) {
+                    try { c.connect(); break; }
+                    catch (java.io.IOException e) {
+                        if (System.currentTimeMillis() > until || (e.getMessage() != null && e.getMessage().startsWith("Associazione"))) throw e;
+                        setStatus("◌ ATTESA WI-FI FOTOCAMERA…");
+                        Thread.sleep(2000);
+                        if (m == 2) c = new CanonClient.Ccapi(h, n);
+                        else { CanonClient.PtpIp p = new CanonClient.PtpIp(h, n, Session.guid(this), Session.friendlyName()); p.onAwaitingPairing = ((CanonClient.PtpIp) c).onAwaitingPairing; c = p; }
+                    }
+                }
+                final CanonClient cc = c;
+                Session.client = cc;
+                setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA…");
+                List<CanonClient.Item> items = cc.list((done, tot) -> setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA · " + done + " FILE"));
                 List<Session.Shot> shots = Session.group(items);
                 synchronized (Session.shots) { Session.shots.clear(); Session.shots.addAll(shots); }
                 linking = false;
                 ui.post(this::rebuild);
-                if (c instanceof CanonClient.Ccapi) fillCcapiDates((CanonClient.Ccapi) c, items);
+                if (cc instanceof CanonClient.Ccapi) fillCcapiDates((CanonClient.Ccapi) cc, items);
             } catch (Exception e) {
                 Session.disconnect();
                 linking = false;

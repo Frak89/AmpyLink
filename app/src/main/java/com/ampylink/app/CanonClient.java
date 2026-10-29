@@ -249,7 +249,7 @@ abstract class CanonClient {
                 out = cmd.getOutputStream();
                 byte[] name = (friendly + "\0").getBytes(StandardCharsets.UTF_16LE);
                 ByteBuffer b = le(16 + name.length + 4);
-                b.putLong(guid.getMostSignificantBits()).putLong(guid.getLeastSignificantBits()).put(name).putInt(0x00010000);
+                b.put(CanonBle.guidBytes(guid)).put(name).putInt(0x00010000); // GUID as raw bytes, same as sent over BLE (reversed there)
                 send(1, b.array());
                 ack = read();
                 if (ack.type == 2) break;
