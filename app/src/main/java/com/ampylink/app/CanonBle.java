@@ -218,8 +218,21 @@ final class CanonBle {
     Ap connectAndStartWifi(boolean firstPairing, UUID guid, String phoneName, Status st) throws IOException {
         st.on("BLUETOOTH · CONNESSIONE A " + safeName() + "…");
         gatt = dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE);
-        Object[] c = await("conn", 15000);
-        if ((Integer) c[2] != BluetoothProfile.STATE_CONNECTED) throw new IOException("Bluetooth: connessione rifiutata (" + c[1] + ")");
+        Object[] c;
+        try {
+            c = await("conn", 12000);
+            if ((Integer) c[2] != BluetoothProfile.STATE_CONNECTED) throw new IOException("stato " + c[1]);
+        } catch (IOException first) {
+            // camera off / asleep: it only advertises now and then — let Android wait for it (autoConnect)
+            Trace.log("BLE connessione diretta fallita (" + first.getMessage() + "): attesa con autoConnect");
+            try { gatt.close(); } catch (Exception ignored) {}
+            ops.clear();
+            st.on("BLUETOOTH · ATTESA FOTOCAMERA (anche spenta, con Bluetooth attivo)…");
+            gatt = dev.connectGatt(ctx, true, cb, BluetoothDevice.TRANSPORT_LE);
+            c = await("conn", 60000);
+            if ((Integer) c[2] != BluetoothProfile.STATE_CONNECTED) throw new IOException("Bluetooth: la fotocamera non risponde (" + c[1] + ")");
+        }
+        Trace.log("BLE connesso a " + safeName() + " · bond=" + dev.getBondState());
         sleep(400);
         gatt.requestMtu(185);
         try { await("mtu", 3000); } catch (IOException ignored) {}

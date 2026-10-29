@@ -64,6 +64,9 @@ final class Session {
         return u.endsWith(".CR3") || u.endsWith(".CR2") || u.endsWith(".DNG") || u.endsWith(".NEF") || u.endsWith(".ARW");
     }
 
+    static void log(String s) { Trace.log(s); }
+    static String logText() { return Trace.text(); }
+
     static volatile CanonClient client;
     static final List<Shot> shots = Collections.synchronizedList(new ArrayList<>());
     static final List<Shot> localShots = Collections.synchronizedList(new ArrayList<>());

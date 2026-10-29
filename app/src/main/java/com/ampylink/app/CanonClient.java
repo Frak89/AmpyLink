@@ -238,7 +238,8 @@ abstract class CanonClient {
 
         private Socket sock() throws IOException {
             Socket s = network != null ? network.getSocketFactory().createSocket() : new Socket();
-            s.connect(new InetSocketAddress(host, PORT), 6000);
+            try { s.connect(new InetSocketAddress(host, PORT), 6000); }
+            catch (IOException e) { Trace.log("PTP/IP TCP " + host + ":" + PORT + " FALLITO: " + e.getMessage() + (network == null ? " (nessuna rete Wi-Fi)" : "")); throw e; }
             s.setSoTimeout(30000);
             s.setTcpNoDelay(true);
             s.setKeepAlive(true);
@@ -256,8 +257,10 @@ abstract class CanonClient {
                 byte[] name = (friendly + "\0").getBytes(StandardCharsets.UTF_16LE);
                 ByteBuffer b = le(16 + name.length + 4);
                 b.put(CanonBle.guidBytes(guid)).put(name).putInt(0x00010000); // GUID as raw bytes, same as sent over BLE (reversed there)
+                Trace.log("PTP/IP → InitCommandRequest " + host + ":15740 name=" + friendly + " guid=" + guid);
                 send(1, b.array());
                 ack = read();
+                Trace.log("PTP/IP ← packet type " + ack.type + (ack.type == 5 && ack.payload.length >= 4 ? " InitFail reason=" + ack.le().getInt() : ""));
                 if (ack.type == 2) break;
                 try { cmd.close(); } catch (Exception ignored) {}
                 if (ack.type != 5) throw new IOException("Risposta PTP/IP inattesa " + ack.type);
@@ -283,7 +286,9 @@ abstract class CanonClient {
             Packet eack = readFrom(new DataInputStream(evt.getInputStream()));
             if (eack.type != 4) throw new IOException("Canale eventi rifiutato dalla fotocamera");
             startEventPump();
+            Trace.log("PTP/IP event channel OK · camera «" + cameraName + "»");
             Response r = op(0x1002, null, 1); // OpenSession
+            Trace.log("PTP/IP OpenSession → 0x" + Integer.toHexString(r.code));
             if (r.code != OK && r.code != 0x201E) throw new IOException("OpenSession 0x" + Integer.toHexString(r.code));
             // Canon EOS: enable remote + event mode (ignored by non-Canon devices)
             try {

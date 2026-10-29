@@ -85,6 +85,7 @@ public final class GalleryActivity extends Activity {
         ui.postDelayed(keepAlive, 8000);
         rebuild();
         if (Session.client == null && Session.shots.isEmpty()) showEmpty();
+        ui.postDelayed(this::autoConnect, 600);
     }
 
     // ------------------------------------------------------------------ UI
@@ -111,6 +112,7 @@ public final class GalleryActivity extends Activity {
         row1.addView(prn, Neon.wrap(pad / 2));
         linkBtn = Cyber.button(this, "LINK", Cyber.MAGENTA);
         linkBtn.setOnClickListener(v -> showLinkDialog());
+        linkBtn.setOnLongClickListener(v -> { showLog(); return true; });
         row1.addView(linkBtn, Neon.wrap(pad / 2));
         top.addView(row1);
         statusLine = Neon.caption(this, "", 9);
@@ -211,7 +213,42 @@ public final class GalleryActivity extends Activity {
         getWindow().setDecorFitsSystemWindows(false);
     }
 
-    private void setStatus(String s) { ui.post(() -> statusLine.setText(s)); }
+    private void setStatus(String s) { Session.log(s); ui.post(() -> statusLine.setText(s)); }
+
+    /** LOG: the full connection sequence, copyable, to see exactly where it stops. */
+    private void showLog() {
+        Object[] dv = Neon.dialog(this, "LOG // CONNESSIONE", true);
+        Dialog d = (Dialog) dv[0];
+        LinearLayout root = (LinearLayout) dv[1];
+        String txt = Session.logText();
+        TextView t = Cyber.label(this, txt.isEmpty() ? "(vuoto)" : txt, 8, Cyber.TEXT);
+        t.setShadowLayer(0, 0, 0, 0);
+        t.setTextIsSelectable(true);
+        t.setLineSpacing(0, 1.2f);
+        root.addView(t);
+        TextView copy = Cyber.button(this, "COPIA LOG", Cyber.MAGENTA);
+        copy.setOnClickListener(v -> {
+            android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("AmpyLink log", txt));
+            Toast.makeText(this, "Log copiato: incollalo nella chat", Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Cyber.dp(this, 10);
+        root.addView(copy, lp);
+        d.show();
+    }
+
+    /** Like Camera Connect: on start, wake the paired camera over Bluetooth and bring up its Wi-Fi. */
+    private void autoConnect() {
+        if (Session.client != null || linking || !sp.getBoolean("ble_auto", true)) return;
+        String mac = sp.getString("ble_mac", null), name = sp.getString("ble_name", "EOS");
+        if (mac == null || sp.getString("ble_paired", null) == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= 31 && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        android.bluetooth.BluetoothAdapter ad = KodakBt.adapter(this);
+        if (ad == null || !ad.isEnabled()) return;
+        Session.log("AUTO-COLLEGA via Bluetooth → " + name + " " + mac);
+        try { bleLink(ad.getRemoteDevice(mac), name); } catch (Exception e) { Session.log("auto-collega: " + e.getMessage()); }
+    }
 
     private void updateStatusIdle() {
         CanonClient c = Session.client;
@@ -594,6 +631,14 @@ public final class GalleryActivity extends Activity {
             alp.topMargin = pad / 2;
             root.addView(again, alp);
         }
+        TextView auto = Neon.chip(this, "AUTO-COLLEGA ALL'AVVIO (ANCHE A FOTOCAMERA SPENTA)", Cyber.YELLOW);
+        Neon.styleChip(auto, sp.getBoolean("ble_auto", true), Cyber.YELLOW);
+        auto.setOnClickListener(v -> { boolean on = !sp.getBoolean("ble_auto", true); sp.edit().putBoolean("ble_auto", on).apply(); Neon.styleChip(auto, on, Cyber.YELLOW); });
+        LinearLayout.LayoutParams aulp = new LinearLayout.LayoutParams(-1, -2);
+        aulp.topMargin = pad / 2;
+        root.addView(auto, aulp);
+        root.addView(Neon.caption(this, "⚠ Se sul telefono c'è Canon Camera Connect, chiudilo (Impostazioni › App › Camera Connect › Forza arresto): tiene occupata la fotocamera via Bluetooth e AmpyLink non riesce a collegarsi. " +
+            "Sulla R6 II lascia attivo il Bluetooth (Impostazioni wireless › Bluetooth) così si può svegliare anche da spenta.", 8));
         TextView bleScan = Cyber.button(this, "CERCA FOTOCAMERA VIA BLUETOOTH", Cyber.CYAN);
         bleScan.setOnClickListener(v -> { if (PrintSheet.ensureBt(this)) { d.dismiss(); bleScanDialog(); } });
         LinearLayout.LayoutParams blp2 = new LinearLayout.LayoutParams(-1, -2);
@@ -652,6 +697,11 @@ public final class GalleryActivity extends Activity {
         root.addView(go, glp);
         root.addView(Neon.caption(this, "Nome telefono per l'associazione: " + Session.friendlyName() +
             "\nDopo un riavvio: sulla fotocamera riapri la connessione allo smartphone e scegli il telefono già registrato, poi tocca COLLEGA.", 8));
+        TextView logBtn = Cyber.button(this, "LOG CONNESSIONE", Cyber.YELLOW);
+        logBtn.setOnClickListener(v -> showLog());
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(-1, -2);
+        llp.topMargin = pad / 2;
+        root.addView(logBtn, llp);
         TextView reset = Cyber.button(this, "RESET ASSOCIAZIONE", Cyber.DIM);
         reset.setTextColor(Cyber.TEXT);
         reset.setOnClickListener(v -> {
@@ -745,6 +795,7 @@ public final class GalleryActivity extends Activity {
                 Session.disconnect();
                 linking = false;
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                Session.log("✕ " + msg);
                 ui.post(() -> { rebuild(); statusLine.setText("✕ BLUETOOTH: " + msg); statusLine.setTextColor(Cyber.MAGENTA); });
             }
         }, "ble-link").start();
@@ -831,6 +882,7 @@ public final class GalleryActivity extends Activity {
                 Session.disconnect();
                 linking = false;
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                Session.log("✕ " + msg);
                 ui.post(() -> { rebuild(); statusLine.setText("✕ LINK FALLITO: " + msg); statusLine.setTextColor(Cyber.MAGENTA); });
             }
         });
