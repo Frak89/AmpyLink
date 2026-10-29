@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ampy_bg">#07070C</color>
+    <style name="AmpyTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ampy_bg</item>
+        <item name="android:colorAccent">#00F0FF</item>
+        <item name="android:colorPrimary">#07070C</item>
+        <item name="android:colorPrimaryDark">#07070C</item>
+        <item name="android:statusBarColor">#07070C</item>
+        <item name="android:navigationBarColor">#07070C</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

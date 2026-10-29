@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- KODAK 2.1x3.4 card outline (magenta) + neon aperture triangle (AmpyRaw) + Wi-Fi arcs -->
+    <path android:strokeColor="#33FF2BD6" android:strokeWidth="8" android:pathData="M38,26 L70,26 L70,82 L38,82 Z" />
+    <path android:strokeColor="#FF2BD6" android:strokeWidth="3" android:pathData="M38,26 L70,26 L70,82 L38,82 Z" />
+    <path android:strokeColor="#3300F0FF" android:strokeWidth="7" android:strokeLineJoin="miter" android:pathData="M54,36 L66,60 L42,60 Z" />
+    <path android:strokeColor="#00F0FF" android:strokeWidth="3" android:strokeLineJoin="miter" android:pathData="M54,36 L66,60 L42,60 Z" />
+    <path android:fillColor="#F5FF3B" android:pathData="M51,50 L57,50 L54,44 Z" />
+    <path android:strokeColor="#C8F7FF" android:strokeWidth="2" android:pathData="M44,70 L64,70 M44,75 L56,75" />
+    <path android:strokeColor="#00F0FF" android:strokeWidth="2.5" android:pathData="M76,30 A10,10 0 0 1 76,44 M81,25 A17,17 0 0 1 81,49" />
+</vector>
