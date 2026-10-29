@@ -216,6 +216,20 @@ final class CanonBle {
 
     /** Blocking. Pairs if needed, reads the AP config and asks the camera to start its Wi-Fi. */
     Ap connectAndStartWifi(boolean firstPairing, UUID guid, String phoneName, Status st) throws IOException {
+        connect(firstPairing, guid, phoneName, st);
+        return requestWifi(st);
+    }
+
+    boolean isConnected() { return gatt != null && connState == BluetoothProfile.STATE_CONNECTED; }
+    String address() { return dev.getAddress(); }
+
+    /** Blocks until the link drops (background service keeps the camera "attached"). */
+    void awaitDisconnect() throws InterruptedException {
+        while (isConnected()) Thread.sleep(1000);
+    }
+
+    /** Connect, (pair), register the phone — the part the background service keeps alive. */
+    synchronized void connect(boolean firstPairing, UUID guid, String phoneName, Status st) throws IOException {
         st.on("BLUETOOTH · CONNESSIONE A " + safeName() + "…");
         gatt = dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE);
         Object[] c;
@@ -282,6 +296,13 @@ final class CanonBle {
             }
         }
 
+    }
+
+    /** Ask the camera for its access point and power it on (handover). */
+    synchronized Ap requestWifi(Status st) throws IOException {
+        if (!isConnected()) throw new IOException("Bluetooth: fotocamera non collegata");
+        BluetoothGattCharacteristic cmd = ch(SVC_SYSTEM, CH_COMMAND);
+        events.clear();
         st.on("BLUETOOTH · RICHIESTA CONFIGURAZIONE WI-FI…");
         Ap ap = new Ap();
         BluetoothGattCharacteristic wap = ch(SVC_WAP, CH_WAP_CP);

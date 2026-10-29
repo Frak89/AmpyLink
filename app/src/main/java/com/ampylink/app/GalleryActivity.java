@@ -85,6 +85,7 @@ public final class GalleryActivity extends Activity {
         ui.postDelayed(keepAlive, 8000);
         rebuild();
         if (Session.client == null && Session.shots.isEmpty()) showEmpty();
+        if (CameraLinkService.enabled(this)) CameraLinkService.start(this);
         ui.postDelayed(this::autoConnect, 600);
     }
 
@@ -637,6 +638,24 @@ public final class GalleryActivity extends Activity {
         LinearLayout.LayoutParams aulp = new LinearLayout.LayoutParams(-1, -2);
         aulp.topMargin = pad / 2;
         root.addView(auto, aulp);
+        TextView svcChip = Neon.chip(this, "SERVIZIO IN BACKGROUND (COME CAMERA CONNECT)", Cyber.YELLOW);
+        Neon.styleChip(svcChip, CameraLinkService.enabled(this), Cyber.YELLOW);
+        svcChip.setOnClickListener(v -> {
+            boolean on = !CameraLinkService.enabled(this);
+            if (on) {
+                if (!PrintSheet.ensureBt(this)) return;
+                if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 77);
+                if (sp.getString("ble_mac", null) == null) { Toast.makeText(this, "Prima collega la fotocamera via Bluetooth una volta", Toast.LENGTH_LONG).show(); return; }
+            }
+            sp.edit().putBoolean("svc_on", on).apply();
+            Neon.styleChip(svcChip, on, Cyber.YELLOW);
+            if (on) CameraLinkService.start(this); else CameraLinkService.stop(this);
+            Toast.makeText(this, on ? "Servizio attivo: la fotocamera resta collegata via Bluetooth anche ad app chiusa" : "Servizio fermato", Toast.LENGTH_LONG).show();
+        });
+        LinearLayout.LayoutParams svlp = new LinearLayout.LayoutParams(-1, -2);
+        svlp.topMargin = pad / 3;
+        root.addView(svcChip, svlp);
         root.addView(Neon.caption(this, "⚠ Se sul telefono c'è Canon Camera Connect, chiudilo (Impostazioni › App › Camera Connect › Forza arresto): tiene occupata la fotocamera via Bluetooth e AmpyLink non riesce a collegarsi. " +
             "Sulla R6 II lascia attivo il Bluetooth (Impostazioni wireless › Bluetooth) così si può svegliare anche da spenta.", 8));
         TextView bleScan = Cyber.button(this, "CERCA FOTOCAMERA VIA BLUETOOTH", Cyber.CYAN);
@@ -801,9 +820,24 @@ public final class GalleryActivity extends Activity {
         final boolean first = !dev.getAddress().equals(sp.getString("ble_paired", null));
         new Thread(() -> {
             try {
-                CanonBle ble = new CanonBle(this, dev);
-                CanonBle.Ap ap = ble.connectAndStartWifi(first, Session.guid(this), Session.friendlyName(), s -> setStatus("◌ " + s));
-                Session.ble = ble;
+                CanonBle.Ap ap;
+                CanonBle svc = CameraLinkService.linked(dev.getAddress());
+                if (svc == null && CameraLinkService.enabled(this) && dev.getAddress().equals(sp.getString("ble_mac", null))) {
+                    // the background service owns the Bluetooth link: wait for it instead of competing
+                    long until = System.currentTimeMillis() + 75000;
+                    while ((svc = CameraLinkService.linked(dev.getAddress())) == null && System.currentTimeMillis() < until) {
+                        setStatus("◌ SERVIZIO: " + CameraLinkService.state);
+                        Thread.sleep(1000);
+                    }
+                }
+                if (svc != null) {
+                    setStatus("◌ BLUETOOTH GIÀ COLLEGATO (SERVIZIO) · RICHIESTA WI-FI…");
+                    ap = svc.requestWifi(s -> setStatus("◌ " + s));
+                } else {
+                    CanonBle ble = new CanonBle(this, dev);
+                    ap = ble.connectAndStartWifi(first, Session.guid(this), Session.friendlyName(), s -> setStatus("◌ " + s));
+                    Session.ble = ble;
+                }
                 sp.edit().putString("ble_mac", dev.getAddress()).putString("ble_name", name).putString("ble_paired", dev.getAddress())
                     .putString("ip", ap.ip).putInt("mode", 1).apply();
                 setStatus("◌ WI-FI " + ap.ssid + " · CONFERMA LA RETE NEL POPUP DI ANDROID…");
@@ -1056,6 +1090,11 @@ public final class GalleryActivity extends Activity {
         v.clear(); v.put(MediaStore.MediaColumns.IS_PENDING, 0);
         ctx.getContentResolver().update(u, v, null, null);
         return u;
+    }
+
+    @Override protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        if (i != null && i.getBooleanExtra("wifi", false)) ui.postDelayed(this::autoConnect, 300);
     }
 
     @Override protected void onResume() { super.onResume(); if (adapter != null) rebuild(); }
