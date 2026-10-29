@@ -759,6 +759,23 @@ public final class GalleryActivity extends Activity {
         root.addView(rows);
         final java.util.Set<String> seen = new java.util.HashSet<>();
         final Runnable[] stop = {null};
+        // cameras already paired with this phone (e.g. by Camera Connect) are listed right away
+        try {
+            for (android.bluetooth.BluetoothDevice dev : KodakBt.adapter(this).getBondedDevices()) {
+                String n = dev.getName();
+                if (n == null) continue;
+                String u = n.toUpperCase(Locale.US);
+                if (!(u.startsWith("EOS") || u.contains("CANON") || u.contains("R6"))) continue;
+                if (!seen.add(dev.getAddress())) continue;
+                TextView t = Cyber.button(this, "▣ " + n + "\n" + dev.getAddress() + " · GIÀ ASSOCIATA AL TELEFONO", Cyber.MAGENTA);
+                t.setGravity(Gravity.START);
+                t.setOnClickListener(v -> { if (stop[0] != null) stop[0].run(); d.dismiss(); bleLink(dev, n); });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.topMargin = pad / 2;
+                rows.addView(t, lp);
+                state.setText("TOCCA LA FOTOCAMERA PER COLLEGARLA");
+            }
+        } catch (SecurityException ignored) {}
         stop[0] = CanonBle.scan(this, (dev, name, rssi) -> ui.post(() -> {
             if (!seen.add(dev.getAddress())) return;
             TextView t = Cyber.button(this, "▣ " + name + "\n" + dev.getAddress() + " · " + rssi + " dBm", Cyber.MAGENTA);
@@ -850,7 +867,7 @@ public final class GalleryActivity extends Activity {
                 if (m == 2) c = new CanonClient.Ccapi(h, n);
                 else {
                     CanonClient.PtpIp p = new CanonClient.PtpIp(h, n, Session.guid(this), Session.friendlyName());
-                    p.onAwaitingPairing = () -> setStatus("◌ CONFERMA «" + Session.friendlyName() + "» SUL DISPLAY DELLA FOTOCAMERA…");
+                    p.onAwaitingPairing = () -> setStatus("◌ FOTOCAMERA OCCUPATA, RIPROVO… (se compare una richiesta sul display, accettala)");
                     c = p;
                 }
                 setStatus("◌ " + c.mode() + " · " + h + " · HANDSHAKE…");

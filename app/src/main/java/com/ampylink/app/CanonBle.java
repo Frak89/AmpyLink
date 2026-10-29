@@ -239,7 +239,8 @@ final class CanonBle {
         if (!gatt.discoverServices()) throw new IOException("Bluetooth: discovery servizi fallita");
         await("svc", 15000);
         if (gatt.getService(SVC_SYSTEM) == null) throw new IOException("Non è una fotocamera Canon compatibile (servizio BLE assente)");
-        if (dev.getBondState() != BluetoothDevice.BOND_BONDED) { st.on("BLUETOOTH · ASSOCIAZIONE ANDROID…"); bond(); }
+        final boolean wasBonded = dev.getBondState() == BluetoothDevice.BOND_BONDED;
+        if (!wasBonded) { st.on("BLUETOOTH · ASSOCIAZIONE ANDROID…"); bond(); }
 
         BluetoothGattCharacteristic pair = opt(SVC_SYSTEM, CH_PAIR), cmd = ch(SVC_SYSTEM, CH_COMMAND);
         subscribe(opt(SVC_SYSTEM, CH_RESPONSE));
@@ -248,12 +249,22 @@ final class CanonBle {
         subscribe(opt(SVC_WAP, CH_WAP_CP));
         subscribe(opt(SVC_WAP, CH_WAP_STATUS));
 
-        if (firstPairing && pair != null) {
+        if (firstPairing && wasBonded) Trace.log("BLE: già associata al telefono → nessuna richiesta di conferma, passo al Wi-Fi");
+        if (firstPairing && pair != null && !wasBonded) {
             st.on("CONFERMA «" + phoneName + "» SUL DISPLAY DELLA FOTOCAMERA…");
-            write(pair, concat(new byte[]{1}, ascii(phoneName)));
-            byte[] r = event(CH_PAIR, 90000);
-            if (r == null) throw new IOException("Associazione non confermata sulla fotocamera");
-            if (r.length == 0 || r[0] != 2) throw new IOException("Associazione rifiutata dalla fotocamera (" + (r.length > 0 ? r[0] : -1) + ")");
+            boolean ok = false;
+            try {
+                write(pair, concat(new byte[]{1}, ascii(phoneName)));
+                // already bonded (e.g. by Camera Connect): don't block on a prompt that may never come
+                byte[] r = event(CH_PAIR, wasBonded ? 12000 : 90000);
+                Trace.log("BLE pairing → " + (r == null ? "nessuna risposta" : "risposta " + (r.length > 0 ? r[0] : -1)));
+                if (r != null && r.length > 0 && r[0] == 2) ok = true;
+                else if (!wasBonded) throw new IOException(r == null ? "Associazione non confermata sulla fotocamera" : "Associazione rifiutata dalla fotocamera (" + (r.length > 0 ? r[0] : -1) + ")");
+            } catch (IOException e) {
+                if (!wasBonded) throw e;
+                Trace.log("BLE pairing saltato (già associata): " + e.getMessage());
+            }
+            if (!ok) st.on("BLUETOOTH · FOTOCAMERA GIÀ ASSOCIATA, PROSEGUO…");
         }
         BluetoothGattCharacteristic init = opt(SVC_SYSTEM, CH_INIT);
         if (init != null && (init.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) != 0) try { read(init); } catch (IOException ignored) {}
@@ -261,9 +272,14 @@ final class CanonBle {
             st.on("BLUETOOTH · REGISTRAZIONE TELEFONO…");
             byte[] g = guidBytes(guid);
             reverse(g);
-            write(cmd, concat(new byte[]{3}, g));
-            write(cmd, concat(new byte[]{4}, ascii(phoneName)));
-            write(cmd, new byte[]{5, 2});
+            try {
+                write(cmd, concat(new byte[]{3}, g));
+                write(cmd, concat(new byte[]{4}, ascii(phoneName)));
+                write(cmd, new byte[]{5, 2});
+            } catch (IOException e) {
+                if (!wasBonded) throw e;
+                Trace.log("BLE identità non accettata: " + e.getMessage());
+            }
         }
 
         st.on("BLUETOOTH · RICHIESTA CONFIGURAZIONE WI-FI…");
