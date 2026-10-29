@@ -116,21 +116,104 @@ final class Session {
 
     // ------------------------------------------------------------------ camera fetches
 
+    // ------------------------------------------------------------------ disk cache (thumbnails + previews)
+
+    static volatile String lastThumbError;
+    private static final Map<String, Integer> thumbFails = Collections.synchronizedMap(new java.util.HashMap<>());
+
+    /** Stable cache id for a picture: folder/name + size + time (same file on the same card). */
+    static String cacheId(Shot s) {
+        String k;
+        if (s.isLocal()) k = s.local.toString() + "|" + s.localSize;
+        else { CanonClient.Item p = s.primary(); k = p.key() + "|" + p.size + "|" + p.time; }
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-1").digest(k.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder b = new StringBuilder();
+            for (int i = 0; i < 10; i++) b.append(String.format(Locale.US, "%02x", h[i]));
+            return b.toString();
+        } catch (Exception e) { return Integer.toHexString(k.hashCode()); }
+    }
+
+    static File thumbFile(Context c, Shot s) { File d = new File(c.getFilesDir(), "thumbs"); d.mkdirs(); return new File(d, cacheId(s) + ".jpg"); }
+    static File previewFile(Context c, Shot s, int max) { File d = new File(c.getFilesDir(), "previews"); d.mkdirs(); return new File(d, cacheId(s) + "_" + max + ".jpg"); }
+
+    static boolean thumbGaveUp(Shot s) { Integer n = thumbFails.get(s.key()); return n != null && n >= 2; }
+
+    private static void saveJpeg(Bitmap b, File f, int q) {
+        File tmp = new File(f.getPath() + ".tmp");
+        try (FileOutputStream o = new FileOutputStream(tmp)) { b.compress(Bitmap.CompressFormat.JPEG, q, o); }
+        catch (Exception e) { tmp.delete(); return; }
+        tmp.renameTo(f);
+    }
+
+    /** Keep the preview cache under ~400 MB (oldest first). */
+    static void trimPreviews(Context c) {
+        File[] fs = new File(c.getFilesDir(), "previews").listFiles();
+        if (fs == null) return;
+        long total = 0; for (File f : fs) total += f.length();
+        if (total < 400L << 20) return;
+        java.util.Arrays.sort(fs, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (File f : fs) { if (total < 300L << 20) break; total -= f.length(); f.delete(); }
+    }
+
+    private static Bitmap shrink(Bitmap b, int max) {
+        int m = Math.max(b.getWidth(), b.getHeight());
+        if (m <= max) return b;
+        return Bitmap.createScaledBitmap(b, Math.max(1, b.getWidth() * max / m), Math.max(1, b.getHeight() * max / m), true);
+    }
+
+    private static Bitmap decodeSampled(byte[] d, int max) {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(d, 0, d.length, o);
+        if (o.outWidth <= 0) return null;
+        o.inSampleSize = sample(o.outWidth, o.outHeight, max);
+        o.inJustDecodeBounds = false;
+        return BitmapFactory.decodeByteArray(d, 0, d.length, o);
+    }
+
+    /** Memory → disk → camera thumbnail → embedded preview from the file head. Never retried forever. */
     static Bitmap thumbnail(Context ctx, Shot s) {
         Bitmap b = thumbs.get(s.key());
         if (b != null) return b;
+        File df = thumbFile(ctx, s);
+        if (df.exists()) {
+            b = BitmapFactory.decodeFile(df.getPath());
+            if (b != null) { thumbs.put(s.key(), b); return b; }
+        }
+        if (thumbGaveUp(s)) return null;
+        String err = null;
         try {
             if (s.isLocal()) {
                 b = ctx.getContentResolver().loadThumbnail(s.local, new Size(320, 320), null);
             } else {
                 CanonClient c = client;
                 if (c == null) return null;
-                byte[] t = c.thumbnail(s.primary());
-                if (c instanceof CanonClient.Ccapi && s.time == 0) s.time = s.primary().time;
-                b = BitmapFactory.decodeByteArray(t, 0, t.length);
+                try {
+                    byte[] t = c.thumbnail(s.primary());
+                    if (c instanceof CanonClient.Ccapi && s.time == 0) s.time = s.primary().time;
+                    if (t != null && t.length > 0) b = decodeSampled(t, 480);
+                    if (b == null) err = "miniatura non decodificabile (" + (t == null ? 0 : t.length) + " byte)";
+                } catch (Exception e) { err = "GetThumb: " + e.getMessage(); }
+                if (b == null) { // fallback: embedded preview in the first bytes of the file
+                    CanonClient.Item it = s.raw != null && s.jpg == null ? s.raw : s.primary();
+                    byte[] h = head(ctx, s, it);
+                    byte[] jp = h != null ? Exif.previewJpeg(h) : null;
+                    if (jp != null) b = decodeSampled(jp, 480);
+                    if (b != null && h != null) b = rotate(b, Exif.parse(h).orientation);
+                    if (b == null) err = (err != null ? err + " · " : "") + "anteprima interna assente";
+                }
             }
-        } catch (Exception e) { b = null; }
-        if (b != null) thumbs.put(s.key(), b);
+        } catch (Exception e) { err = e.getMessage(); b = null; }
+        if (b == null) {
+            Integer n = thumbFails.get(s.key());
+            thumbFails.put(s.key(), n == null ? 1 : n + 1);
+            if (err != null) lastThumbError = s.name() + ": " + err;
+            return null;
+        }
+        b = shrink(b, 360);
+        thumbs.put(s.key(), b);
+        saveJpeg(b, df, 88);
         return b;
     }
 
@@ -216,6 +299,18 @@ final class Session {
      * preview from the first bytes (no 25 MB transfer). CCAPI: display JPEG.
      */
     static Bitmap preview(Context ctx, Shot s, int maxSide, CanonClient.Progress p) throws IOException {
+        File pf = previewFile(ctx, s, maxSide);
+        if (pf.exists()) {
+            Bitmap c = BitmapFactory.decodeFile(pf.getPath());
+            if (c != null) { pf.setLastModified(System.currentTimeMillis()); return c; }
+        }
+        Bitmap b = previewUncached(ctx, s, maxSide, p);
+        saveJpeg(b, pf, 92);
+        trimPreviews(ctx);
+        return b;
+    }
+
+    private static Bitmap previewUncached(Context ctx, Shot s, int maxSide, CanonClient.Progress p) throws IOException {
         byte[] jpeg = null;
         int orientation = 1;
         if (s.isLocal()) {

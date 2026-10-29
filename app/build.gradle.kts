@@ -7,8 +7,8 @@ android {
         applicationId = "com.ampylink.app"
         minSdk = 30          // Android 11+
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }

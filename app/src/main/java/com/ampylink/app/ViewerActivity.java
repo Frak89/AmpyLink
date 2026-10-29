@@ -58,17 +58,29 @@ public final class ViewerActivity extends Activity {
         show(index);
     }
 
-    @Override public void onConfigurationChanged(Configuration c) { super.onConfigurationChanged(c); build(); show(index); }
+    @Override public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        Bitmap keep = previewBm; Session.Shot keepShot = shot;
+        build();
+        show(index);
+        if (keep != null && keepShot == shot) { previewBm = keep; image.setBitmap(keep); setStatus(keep.getWidth() + "×" + keep.getHeight() + " ANTEPRIMA · PRONTA", 1f); }
+    }
 
+    private View topBar, panel;
+    private boolean chrome;
+
+    /** Full-screen picture; tap toggles the controls; rotates with the phone. */
     private void build() {
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         int pad = Cyber.dp(this, 10);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(land ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        root.setBackgroundColor(Cyber.BG);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(0xFF000000);
 
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.VERTICAL);
+        image = new ZoomView(this);
+        image.onSwipe = dir -> { int n = index + dir; if (n >= 0 && n < list.size()) show(n); };
+        image.onTap = () -> setChrome(!chrome);
+        root.addView(image, new FrameLayout.LayoutParams(-1, -1));
+
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setBackground(Cyber.panelBg(this));
@@ -87,27 +99,21 @@ public final class ViewerActivity extends Activity {
         top.addView(tcol, new LinearLayout.LayoutParams(0, -2, 1));
         counter = Cyber.label(this, "", 10, Cyber.YELLOW);
         top.addView(counter);
-        left.addView(top);
-
-        FrameLayout imgBox = new FrameLayout(this);
-        image = new ZoomView(this);
-        image.onSwipe = dir -> { int n = index + dir; if (n >= 0 && n < list.size()) show(n); };
-        imgBox.addView(image, new FrameLayout.LayoutParams(-1, -1));
         hist = new UiViews.HistogramView(this);
-        FrameLayout.LayoutParams hlp = new FrameLayout.LayoutParams(Cyber.dp(this, 140), Cyber.dp(this, 56), Gravity.TOP | Gravity.END);
-        hlp.setMargins(pad, pad, pad, pad);
-        imgBox.addView(hist, hlp);
-        left.addView(imgBox, new LinearLayout.LayoutParams(-1, 0, 1));
+        top.addView(hist, new LinearLayout.LayoutParams(Cyber.dp(this, 110), Cyber.dp(this, 40)));
+        ((LinearLayout.LayoutParams) hist.getLayoutParams()).leftMargin = pad;
+        root.addView(top, new FrameLayout.LayoutParams(land ? Cyber.dp(this, 0) : -1, -2, Gravity.TOP));
+        if (land) top.setLayoutParams(new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackground(Cyber.panelBg(this));
-        panel.setPadding(pad, pad, pad, pad);
+        LinearLayout pnl = new LinearLayout(this);
+        pnl.setOrientation(LinearLayout.VERTICAL);
+        pnl.setBackground(Cyber.panelBg(this));
+        pnl.setPadding(pad, pad, pad, pad);
         bar = new Neon.Bar(this);
-        panel.addView(bar);
+        pnl.addView(bar);
         status = Cyber.label(this, "", 9, Cyber.YELLOW);
         status.setPadding(0, pad / 3, 0, pad / 2);
-        panel.addView(status);
+        pnl.addView(status);
 
         LinearLayout src = new LinearLayout(this);
         src.setGravity(Gravity.CENTER_VERTICAL);
@@ -118,13 +124,20 @@ public final class ViewerActivity extends Activity {
         useJpg.setOnClickListener(v -> { preferRaw = false; styleSrc(); });
         src.addView(useRaw, Neon.wrap(pad / 3));
         src.addView(useJpg, Neon.wrap(pad / 3));
-        panel.addView(src);
+        pnl.addView(src);
+
+        TextView ampy = Cyber.button(this, "▲ EDITA RAW · AMPYRAW", Cyber.MAGENTA);
+        ampy.setTextSize(13);
+        ampy.setOnClickListener(v -> editAmpyRaw());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, -2);
+        alp.topMargin = pad / 2;
+        pnl.addView(ampy, alp);
 
         LinearLayout acts = new LinearLayout(this);
-        acts.setPadding(0, pad, 0, 0);
+        acts.setPadding(0, pad / 2, 0, 0);
         TextView print = Cyber.button(this, "STAMPA", Cyber.MAGENTA);
-        TextView edit = Cyber.button(this, "MODIFICA", Cyber.CYAN);
-        TextView ext = Cyber.button(this, "EDITOR RAW", Cyber.CYAN);
+        TextView edit = Cyber.button(this, "FRAME", Cyber.CYAN);
+        TextView ext = Cyber.button(this, "ALTRE APP", Cyber.CYAN);
         TextView save = Cyber.button(this, "SALVA", Cyber.YELLOW);
         print.setOnClickListener(v -> print());
         edit.setOnClickListener(v -> editInApp());
@@ -137,28 +150,55 @@ public final class ViewerActivity extends Activity {
             if (i > 0) lp.leftMargin = pad / 3;
             acts.addView(ab[i], lp);
         }
-        panel.addView(acts);
+        pnl.addView(acts);
 
         exifBox = new LinearLayout(this);
         exifBox.setOrientation(LinearLayout.VERTICAL);
         exifBox.setPadding(0, pad, 0, 0);
         ScrollView sv = new ScrollView(this);
         sv.addView(exifBox);
-        panel.addView(sv, new LinearLayout.LayoutParams(-1, land ? 0 : Cyber.dp(this, 190), land ? 1 : 0));
+        pnl.addView(sv, new LinearLayout.LayoutParams(-1, land ? 0 : Cyber.dp(this, 150), land ? 1 : 0));
 
-        if (land) {
-            root.addView(left, new LinearLayout.LayoutParams(0, -1, 1));
-            root.addView(panel, new LinearLayout.LayoutParams(Cyber.dp(this, 330), -1));
-        } else {
-            root.addView(left, new LinearLayout.LayoutParams(-1, 0, 1));
-            root.addView(panel, new LinearLayout.LayoutParams(-1, -2));
-        }
+        if (land) root.addView(pnl, new FrameLayout.LayoutParams(Cyber.dp(this, 330), -1, Gravity.END));
+        else root.addView(pnl, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        topBar = top; panel = pnl;
         setContentView(root);
         getWindow().setDecorFitsSystemWindows(false);
+        getWindow().getAttributes().layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         root.setOnApplyWindowInsetsListener((v, ins) -> {
-            android.graphics.Insets i = ins.getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
-            v.setPadding(i.left, i.top, i.right, i.bottom);
+            android.graphics.Insets i = ins.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+            top.setPadding(pad + i.left, pad + i.top, pad + (land ? i.right : i.right), pad);
+            pnl.setPadding(pad + (land ? 0 : i.left), pad + (land ? i.top + Cyber.dp(this, 64) : 0), pad + i.right, pad + i.bottom);
             return android.view.WindowInsets.CONSUMED;
+        });
+        setChrome(chrome);
+    }
+
+    private void setChrome(boolean on) {
+        chrome = on;
+        if (topBar != null) { topBar.setVisibility(on ? View.VISIBLE : View.GONE); panel.setVisibility(on ? View.VISIBLE : View.GONE); }
+        android.view.WindowInsetsController c = getWindow().getInsetsController();
+        if (c != null) {
+            if (on) c.show(android.view.WindowInsets.Type.systemBars());
+            else { c.hide(android.view.WindowInsets.Type.systemBars()); c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE); }
+        }
+    }
+
+    /** Opens the RAW (or the JPG if there is none) straight in AmpyRaw. */
+    private void editAmpyRaw() {
+        CanonClient.Item it = shot.isLocal() ? null : (shot.raw != null ? shot.raw : shot.primary());
+        fetch(it, f -> {
+            android.net.Uri u = FileShare.uriFor(f);
+            String mime = FileShare.mime(f.getName());
+            String[][] tries = {{Intent.ACTION_EDIT, mime}, {Intent.ACTION_VIEW, mime}, {Intent.ACTION_EDIT, "image/*"}, {Intent.ACTION_VIEW, "application/octet-stream"}};
+            for (String[] t : tries) {
+                Intent i = new Intent(t[0]).setDataAndType(u, t[1]).setPackage("com.ampyraw.app").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                i.setClipData(android.content.ClipData.newRawUri(f.getName(), u));
+                if (getPackageManager().queryIntentActivities(i, 0).isEmpty()) continue;
+                try { startActivity(i); return; } catch (Exception ignored) {}
+            }
+            Toast.makeText(this, "AmpyRaw non è installato: apro l'editor interno", Toast.LENGTH_LONG).show();
+            editInApp();
         });
     }
 
@@ -323,6 +363,7 @@ public final class ViewerActivity extends Activity {
     static final class ZoomView extends View {
         interface Swipe { void on(int dir); }
         Swipe onSwipe;
+        Runnable onTap;
         private Bitmap bm;
         private final Matrix m = new Matrix();
         private float scale = 1, tx, ty, fit = 1;
@@ -336,6 +377,7 @@ public final class ViewerActivity extends Activity {
                 @Override public boolean onScale(ScaleGestureDetector d) { zoom(d.getScaleFactor(), d.getFocusX(), d.getFocusY()); return true; }
             });
             gd = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener() {
+                @Override public boolean onSingleTapConfirmed(MotionEvent e) { if (onTap != null) onTap.run(); return true; }
                 @Override public boolean onDoubleTap(MotionEvent e) {
                     if (scale > fit * 1.05f) reset(); else zoom(2.5f, e.getX(), e.getY());
                     return true;

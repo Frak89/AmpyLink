@@ -53,6 +53,10 @@ abstract class CanonClient {
 
     interface Progress { void on(long done, long total); }
 
+    /** Called for every file as soon as the card scan finds it (progressive gallery). */
+    interface Sink { void on(Item it); }
+    volatile Sink onItem;
+
     protected final String host;
     protected final Network network; // the camera's Wi-Fi network (no internet) – may be null
     String cameraName = "";
@@ -152,6 +156,7 @@ abstract class CanonClient {
                             Item it = new Item(name, abs(f), 0, -1);
                             it.folder = folder;
                             out.add(it);
+                            Sink sk = onItem; if (sk != null) sk.on(it);
                         }
                         if (prog != null) prog.on(out.size(), -1);
                     }
@@ -358,6 +363,7 @@ abstract class CanonClient {
                     it.w = pw; it.h = ph;
                     it.time = ptpDate(!capture.isEmpty() ? capture : modified);
                     cache.add(it);
+                    Sink sk = onItem; if (sk != null) sk.on(it);
                     if (prog != null && cache.size() % 10 == 0) prog.on(cache.size(), -1);
                 }
             }

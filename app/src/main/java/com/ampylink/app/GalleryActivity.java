@@ -267,6 +267,7 @@ public final class GalleryActivity extends Activity {
         adapter.notifyDataSetChanged();
         updateStatusIdle();
         if (visible.isEmpty()) showEmpty(); else emptyView.setVisibility(View.GONE);
+        emptyView.setClickable(false);
         updateSelBar();
     }
 
@@ -388,8 +389,9 @@ public final class GalleryActivity extends Activity {
         ImageView iv = (ImageView) t.getChildAt(0);
         TextView badge = (TextView) t.getChildAt(1), time = (TextView) t.getChildAt(2), check = (TextView) t.getChildAt(3);
         Bitmap bm = Session.thumbs.get(s.key());
+        iv.setTag(s.key());
         iv.setImageBitmap(bm);
-        if (bm == null) requestThumb(s);
+        if (bm == null && !Session.thumbGaveUp(s)) requestThumb(s);
         String b = s.badge();
         badge.setText(b);
         badge.setTextColor(b.startsWith("RAW") ? Cyber.MAGENTA : b.equals("PHONE") ? Cyber.YELLOW : Cyber.CYAN);
@@ -417,8 +419,25 @@ public final class GalleryActivity extends Activity {
         synchronized (queued) {
             if (queued.contains(s.key())) { thumbQueue.remove(s); thumbQueue.addFirst(s); return; }
             queued.add(s.key());
+            thumbQueue.addFirst(s);
+            // keep only what is (or was just) on screen: drop the oldest requests
+            while (thumbQueue.size() > 80) { Session.Shot old = thumbQueue.pollLast(); if (old != null) queued.remove(old.key()); }
         }
-        thumbQueue.addFirst(s);
+    }
+
+    /** Put a freshly loaded thumbnail into the tiles currently showing it — no full list refresh. */
+    private void showThumb(String key, Bitmap b) {
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View row = list.getChildAt(i);
+            if (!(row instanceof LinearLayout) || ((LinearLayout) row).getOrientation() != LinearLayout.HORIZONTAL) continue;
+            LinearLayout r = (LinearLayout) row;
+            for (int k = 0; k < r.getChildCount(); k++) {
+                View t = r.getChildAt(k);
+                if (!(t instanceof FrameLayout)) continue;
+                ImageView iv = (ImageView) ((FrameLayout) t).getChildAt(0);
+                if (key.equals(iv.getTag())) iv.setImageBitmap(b);
+            }
+        }
     }
 
     private long lastThumbRefresh;
@@ -428,10 +447,17 @@ public final class GalleryActivity extends Activity {
             while (alive) {
                 try {
                     Session.Shot s = thumbQueue.takeFirst();
-                    if (Session.thumbs.get(s.key()) == null) Session.thumbnail(this, s);
                     synchronized (queued) { queued.remove(s.key()); }
-                    long now = System.currentTimeMillis();
-                    if (now - lastThumbRefresh > 120 || thumbQueue.isEmpty()) { lastThumbRefresh = now; ui.post(adapter::notifyDataSetChanged); }
+                    Bitmap b = Session.thumbs.get(s.key());
+                    if (b == null) b = Session.thumbnail(this, s);
+                    final Bitmap fb = b;
+                    final String key = s.key();
+                    if (fb != null) ui.post(() -> showThumb(key, fb));
+                    else {
+                        String err = Session.lastThumbError;
+                        long now = System.currentTimeMillis();
+                        if (err != null && now - lastThumbRefresh > 4000 && !linking) { lastThumbRefresh = now; setStatus("⚠ MINIATURE: " + err); }
+                    }
                 } catch (InterruptedException e) { return; } catch (Exception ignored) {}
             }
         }, "thumbs");
@@ -712,9 +738,12 @@ public final class GalleryActivity extends Activity {
                 final CanonClient cc = c;
                 Session.client = cc;
                 setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA…");
+                synchronized (scanItems) { scanItems.clear(); }
+                cc.onItem = it -> { synchronized (scanItems) { scanItems.add(it); } scheduleRegroup(); };
                 List<CanonClient.Item> items = cc.list((done, tot) -> setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA · " + done + " FILE"));
+                cc.onItem = null;
                 List<Session.Shot> shots = Session.group(items);
-                synchronized (Session.shots) { Session.shots.clear(); Session.shots.addAll(shots); }
+                applyShots(shots);
                 linking = false;
                 ui.post(this::rebuild);
                 if (cc instanceof CanonClient.Ccapi) fillCcapiDates((CanonClient.Ccapi) cc, items);
@@ -725,6 +754,37 @@ public final class GalleryActivity extends Activity {
                 ui.post(() -> { rebuild(); statusLine.setText("✕ LINK FALLITO: " + msg); statusLine.setTextColor(Cyber.MAGENTA); });
             }
         });
+    }
+
+    // progressive card scan: files show up while the camera is still being read
+    private final List<CanonClient.Item> scanItems = new ArrayList<>();
+    private volatile boolean regroupPending;
+
+    private void scheduleRegroup() {
+        if (regroupPending) return;
+        regroupPending = true;
+        ui.postDelayed(() -> {
+            regroupPending = false;
+            List<CanonClient.Item> snap;
+            synchronized (scanItems) { snap = new ArrayList<>(scanItems); }
+            applyShots(Session.group(snap));
+            rebuild();
+            if (emptyView.getVisibility() == View.VISIBLE && !visible.isEmpty()) emptyView.setVisibility(View.GONE);
+        }, 600);
+    }
+
+    /** Replace the shot list, keeping EXIF / selection / dates of pictures we already know. */
+    private void applyShots(List<Session.Shot> shots) {
+        synchronized (Session.shots) {
+            java.util.Map<String, Session.Shot> old = new java.util.HashMap<>();
+            for (Session.Shot o : Session.shots) old.put(o.key(), o);
+            for (Session.Shot n : shots) {
+                Session.Shot o = old.get(n.key());
+                if (o != null) { n.exif = o.exif; n.selected = o.selected; if (n.time == 0) n.time = o.time; }
+            }
+            Session.shots.clear();
+            Session.shots.addAll(shots);
+        }
     }
 
     private void relist() {
