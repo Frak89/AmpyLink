@@ -69,7 +69,7 @@ final class PrintSheet {
     private int index;
     private Bitmap current;
     private volatile boolean printing;
-    private KodakBt link;
+    private PrinterLink link;
 
     PrintSheet(Activity a, Source src, Frames.Layout initial) {
         this.a = a;
@@ -339,9 +339,11 @@ final class PrintSheet {
         list.addView(rows);
         final List<String> seen = new ArrayList<>();
         final BluetoothAdapter ad = KodakBt.adapter(a);
+        final java.util.Map<String, String> leNames = new java.util.HashMap<>();
         java.util.function.Consumer<BluetoothDevice> add = dev -> {
             String name; try { name = dev.getName(); } catch (SecurityException e) { name = null; }
-            if (name == null || seen.contains(dev.getAddress())) return;
+            if (name == null) name = leNames.containsKey(dev.getAddress()) ? leNames.get(dev.getAddress()) : "Kodak (BLE) " + dev.getAddress().substring(12);
+            if (seen.contains(dev.getAddress())) return;
             boolean kodak = KodakBt.looksLikeKodak(name);
             seen.add(dev.getAddress());
             TextView t = Cyber.button(a, (kodak ? "▣ " : "□ ") + name + "\n" + dev.getAddress() + (dev.getBondState() == BluetoothDevice.BOND_BONDED ? " · ASSOCIATA" : ""), kodak ? Cyber.MAGENTA : Cyber.DIM);
@@ -365,7 +367,8 @@ final class PrintSheet {
             @Override public void onReceive(Context c, Intent i) {
                 if (BluetoothDevice.ACTION_FOUND.equals(i.getAction())) {
                     BluetoothDevice dev = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    if (dev != null) add.accept(dev);
+                    String nm = null; try { nm = dev != null ? dev.getName() : null; } catch (SecurityException ignored) {}
+                    if (nm != null) add.accept(dev);
                 } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(i.getAction())) scanState.setText("RICERCA COMPLETATA");
             }
         };
@@ -373,7 +376,21 @@ final class PrintSheet {
         f.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
         a.registerReceiver(rx, f);
         try { ad.startDiscovery(); } catch (SecurityException e) { scanState.setText("PERMESSO BLUETOOTH NEGATO"); }
-        d.setOnDismissListener(x -> { try { a.unregisterReceiver(rx); } catch (Exception ignored) {} try { ad.cancelDiscovery(); } catch (Exception ignored) {} });
+        // LE-only printers ("Kodak Instant-XXXX") only show up in a BLE scan
+        final android.bluetooth.le.ScanCallback le = new android.bluetooth.le.ScanCallback() {
+            @Override public void onScanResult(int type, android.bluetooth.le.ScanResult r) {
+                String n = r.getScanRecord() != null ? r.getScanRecord().getDeviceName() : null;
+                if (n == null) try { n = r.getDevice().getName(); } catch (SecurityException ignored) {}
+                if (KodakBt.looksLikeKodak(n)) { final String fn = n; ui.post(() -> { leNames.put(r.getDevice().getAddress(), fn); add.accept(r.getDevice()); }); }
+            }
+        };
+        try { if (ad.getBluetoothLeScanner() != null) ad.getBluetoothLeScanner().startScan(le); } catch (Exception ignored) {}
+        ui.postDelayed(() -> { try { if (ad.getBluetoothLeScanner() != null) ad.getBluetoothLeScanner().stopScan(le); } catch (Exception ignored) {} }, 15000);
+        d.setOnDismissListener(x -> {
+            try { a.unregisterReceiver(rx); } catch (Exception ignored) {}
+            try { ad.cancelDiscovery(); } catch (Exception ignored) {}
+            try { if (ad.getBluetoothLeScanner() != null) ad.getBluetoothLeScanner().stopScan(le); } catch (Exception ignored) {}
+        });
         d.show();
     }
 
@@ -408,7 +425,7 @@ final class PrintSheet {
                     byte[] jpeg = jpeg(cardBm);
                     if (link == null) {
                         setStatus("CONNESSIONE BLUETOOTH…", -1, -1);
-                        link = KodakBt.open(a, dev);
+                        link = KodakBt.openAuto(a, dev, sp);
                     }
                     final String prefix = n > 1 ? (k + 1) + "/" + n + " · " : "";
                     try {
@@ -418,7 +435,7 @@ final class PrintSheet {
                         if (e.getMessage() != null && e.getMessage().startsWith("Errore stampante")) throw e;
                         closeLink();
                         setStatus("RICONNESSIONE…", -1, -1);
-                        link = KodakBt.open(a, dev);
+                        link = KodakBt.openAuto(a, dev, sp);
                         link.print(jpeg, copies, (t, p, pass) -> setStatus(prefix + t, p, pass));
                     }
                     if (i < n - 1) Thread.sleep(1500);
@@ -438,7 +455,7 @@ final class PrintSheet {
         }, "kodak-print").start();
     }
 
-    private void closeLink() { KodakBt l = link; link = null; if (l != null) l.close(); }
+    private void closeLink() { PrinterLink l = link; link = null; if (l != null) l.close(); }
 
     /** Baseline JPEG for the printer, long side 1024. */
     static byte[] jpeg(Bitmap card) {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash: same dark background, AmpyLink neon icon, then our Matrix splash -->
+    <style name="AmpySplash" parent="AmpyTheme">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowSplashScreenBackground">#07070C</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_fg</item>
+        <item name="android:windowSplashScreenAnimationDuration">300</item>
+    </style>
+</resources>

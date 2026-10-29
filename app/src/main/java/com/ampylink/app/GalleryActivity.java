@@ -165,6 +165,13 @@ public final class GalleryActivity extends Activity {
         list.setAdapter(adapter);
         list.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or, ob) -> { if (r - l != or - ol) ui.post(adapter::notifyDataSetChanged); });
         body.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        list.setVerticalScrollBarEnabled(false);
+        scroller = new NeonScroller(this, scrollModel);
+        body.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
+        list.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView v, int state) { scrollState = state; if (state != SCROLL_STATE_IDLE) scroller.onScrolled(); }
+            @Override public void onScroll(AbsListView v, int first, int count, int total) { if (scrollState != SCROLL_STATE_IDLE || scroller.isDragging()) scroller.onScrolled(); }
+        });
         emptyView = new TextView(this);
         emptyView.setGravity(Gravity.CENTER);
         emptyView.setTypeface(Cyber.MONO);
@@ -244,7 +251,20 @@ public final class GalleryActivity extends Activity {
             visible.add(s);
         }
         Session.sortShots(visible, newestFirst);
+        // remember what the user is looking at, unless they are at the very top
+        String anchorKey = null; int anchorTop = 0;
+        int fv = list.getFirstVisiblePosition();
+        View fvView = list.getChildCount() > 0 ? list.getChildAt(0) : null;
+        boolean atTop = fv == 0 && (fvView == null || fvView.getTop() >= list.getPaddingTop() - Cyber.dp(this, 4));
+        if (!atTop && fv < rows.size()) {
+            for (int i = fv; i < rows.size() && anchorKey == null; i++) if (rows.get(i) instanceof Session.Shot[]) {
+                anchorKey = ((Session.Shot[]) rows.get(i))[0].key();
+                View cv = list.getChildAt(i - fv);
+                anchorTop = cv != null ? cv.getTop() : 0;
+            }
+        }
         rows.clear();
+        rowShot.clear();
         String day = null;
         List<Session.Shot> cur = new ArrayList<>();
         int dayCount = 0;
@@ -264,12 +284,62 @@ public final class GalleryActivity extends Activity {
         }
         flush(cur);
         if (headerIndex >= 0) rows.set(headerIndex, new Header(day, dayCount));
+        // row → index of its first picture in `visible` (headers point at the next one)
+        int idx = 0;
+        for (int i = 0; i < rows.size(); i++) rowShot.add(0);
+        for (int i = 0; i < rows.size(); i++) {
+            rowShot.set(i, Math.min(idx, Math.max(0, visible.size() - 1)));
+            if (rows.get(i) instanceof Session.Shot[]) idx += ((Session.Shot[]) rows.get(i)).length;
+        }
         adapter.notifyDataSetChanged();
+        if (anchorKey != null) {
+            for (int i = 0; i < rows.size(); i++) if (rows.get(i) instanceof Session.Shot[]) {
+                boolean hit = false;
+                for (Session.Shot x : (Session.Shot[]) rows.get(i)) if (x.key().equals(anchorKey)) { hit = true; break; }
+                if (hit) { list.setSelectionFromTop(i, anchorTop); break; }
+            }
+        }
+        if (scroller != null) scroller.invalidate();
         updateStatusIdle();
         if (visible.isEmpty()) showEmpty(); else emptyView.setVisibility(View.GONE);
         emptyView.setClickable(false);
         updateSelBar();
     }
+
+    private NeonScroller scroller;
+    private volatile int scrollState = AbsListView.OnScrollListener.SCROLL_STATE_IDLE;
+    private final List<Integer> rowShot = new ArrayList<>();
+
+    private Session.Shot shotAtRow(int row) {
+        if (row < 0 || row >= rowShot.size() || visible.isEmpty()) return null;
+        return visible.get(Math.min(visible.size() - 1, rowShot.get(row)));
+    }
+
+    private final NeonScroller.Model scrollModel = new NeonScroller.Model() {
+        @Override public int rowCount() { return rows.size(); }
+        @Override public int firstRow() { return list.getFirstVisiblePosition(); }
+        @Override public int visibleRows() { return Math.max(1, list.getLastVisiblePosition() - list.getFirstVisiblePosition() + 1); }
+        @Override public String dateLabel(int row) {
+            Session.Shot s = shotAtRow(row);
+            return s == null || s.time == 0 ? "----.--.--" : new SimpleDateFormat("yyyy.MM.dd", Locale.US).format(new Date(s.time));
+        }
+        @Override public String timeLabel(int row) {
+            Session.Shot s = shotAtRow(row);
+            if (s == null) return "";
+            String day = s.time == 0 ? "" : new SimpleDateFormat("EEE HH:mm", Locale.ITALIAN).format(new Date(s.time)).toUpperCase(Locale.ITALIAN);
+            return day + "  " + s.name();
+        }
+        @Override public String rangeLabel() {
+            int a = list.getFirstVisiblePosition(), b = list.getLastVisiblePosition();
+            if (rowShot.isEmpty()) return "";
+            int from = rowShot.get(Math.max(0, Math.min(rowShot.size() - 1, a))) + 1;
+            int to = from;
+            for (int i = Math.max(0, a); i <= Math.min(rows.size() - 1, b); i++)
+                if (rows.get(i) instanceof Session.Shot[]) to = rowShot.get(i) + ((Session.Shot[]) rows.get(i)).length;
+            return "FOTO " + from + "–" + Math.max(from, to) + " / " + visible.size();
+        }
+        @Override public void scrollToRow(int row) { list.setSelection(Math.max(0, Math.min(rows.size() - 1, row))); }
+    };
 
     private void flush(List<Session.Shot> cur) {
         if (cur.isEmpty()) return;
@@ -763,14 +833,15 @@ public final class GalleryActivity extends Activity {
     private void scheduleRegroup() {
         if (regroupPending) return;
         regroupPending = true;
-        ui.postDelayed(() -> {
+        ui.postDelayed(new Runnable() { @Override public void run() {
+            if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE || (scroller != null && scroller.isDragging())) { ui.postDelayed(this, 400); return; }
             regroupPending = false;
             List<CanonClient.Item> snap;
             synchronized (scanItems) { snap = new ArrayList<>(scanItems); }
             applyShots(Session.group(snap));
             rebuild();
             if (emptyView.getVisibility() == View.VISIBLE && !visible.isEmpty()) emptyView.setVisibility(View.GONE);
-        }, 600);
+        } }, 600);
     }
 
     /** Replace the shot list, keeping EXIF / selection / dates of pictures we already know. */

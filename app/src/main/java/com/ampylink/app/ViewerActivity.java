@@ -184,21 +184,16 @@ public final class ViewerActivity extends Activity {
         }
     }
 
-    /** Opens the RAW (or the JPG if there is none) straight in AmpyRaw. */
+    /** Opens the RAW (or the JPG if there is none) in the AmpyRaw engine built into this app. */
     private void editAmpyRaw() {
         CanonClient.Item it = shot.isLocal() ? null : (shot.raw != null ? shot.raw : shot.primary());
         fetch(it, f -> {
-            android.net.Uri u = FileShare.uriFor(f);
-            String mime = FileShare.mime(f.getName());
-            String[][] tries = {{Intent.ACTION_EDIT, mime}, {Intent.ACTION_VIEW, mime}, {Intent.ACTION_EDIT, "image/*"}, {Intent.ACTION_VIEW, "application/octet-stream"}};
-            for (String[] t : tries) {
-                Intent i = new Intent(t[0]).setDataAndType(u, t[1]).setPackage("com.ampyraw.app").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                i.setClipData(android.content.ClipData.newRawUri(f.getName(), u));
-                if (getPackageManager().queryIntentActivities(i, 0).isEmpty()) continue;
-                try { startActivity(i); return; } catch (Exception ignored) {}
-            }
-            Toast.makeText(this, "AmpyRaw non è installato: apro l'editor interno", Toast.LENGTH_LONG).show();
-            editInApp();
+            Frames.Meta m = meta();
+            startActivity(new Intent(this, EditorActivity.class)
+                .putExtra(EditorActivity.EXTRA_PATH, f.getAbsolutePath())
+                .putExtra("m_date", m.date).putExtra("m_time", m.time).putExtra("m_camera", m.camera)
+                .putExtra("m_exposure", m.exposure).putExtra("m_title", m.title)
+                .putExtra(EditorActivity.EXTRA_FRAME, -1));
         });
     }
 
@@ -230,6 +225,7 @@ public final class ViewerActivity extends Activity {
         previewBm = null;
         Bitmap th = Session.thumbs.get(shot.key());
         image.setBitmap(th);
+        image.glitch(650);
         hist.set(null, null, null, null);
         exifBox.removeAllViews();
         if (shot.exif != null) fillExif(shot.exif); else exifBox.addView(Neon.caption(this, "LETTURA EXIF…", 9));
@@ -244,8 +240,10 @@ public final class ViewerActivity extends Activity {
                 int[][] h = histogram(bm);
                 ui.post(() -> {
                     if (gen != generation) return;
+                    boolean first = previewBm == null;
                     previewBm = bm;
                     image.setBitmap(bm);
+                    if (first) image.glitch(320);
                     hist.set(h[0], h[1], h[2], h[3]);
                     setStatus(bm.getWidth() + "×" + bm.getHeight() + " ANTEPRIMA · PRONTA", 1f);
                 });
@@ -438,10 +436,23 @@ public final class ViewerActivity extends Activity {
             return true;
         }
 
+        private long glitchAt, glitchLen = 0;
+        private final java.util.Random gr = new java.util.Random();
+
+        /** Glitch + RGB split burst (photo opening). */
+        void glitch(long ms) { glitchAt = System.currentTimeMillis(); glitchLen = ms; invalidate(); }
+
         @Override protected void onDraw(Canvas c) {
             if (bm == null) return;
             m.reset(); m.postScale(scale, scale); m.postTranslate(tx, ty);
-            c.drawBitmap(bm, m, p);
+            float k = 0;
+            if (glitchLen > 0) {
+                float t = (System.currentTimeMillis() - glitchAt) / (float) glitchLen;
+                if (t < 1f) { k = (1f - t) * (gr.nextFloat() < 0.25f ? 1f : 0.55f); postInvalidateOnAnimation(); }
+                else glitchLen = 0;
+            }
+            if (k > 0) Fx.glitchBitmap(c, bm, m, k, getWidth(), getHeight(), gr);
+            else c.drawBitmap(bm, m, p);
             Paint o = new Paint(); o.setStyle(Paint.Style.STROKE); o.setColor(Cyber.LINE);
             c.drawRect(new RectF(tx, ty, tx + bm.getWidth() * scale, ty + bm.getHeight() * scale), o);
         }

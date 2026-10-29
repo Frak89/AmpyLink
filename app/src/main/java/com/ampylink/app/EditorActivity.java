@@ -205,7 +205,7 @@ public final class EditorActivity extends Activity {
         bar.setOrientation(land ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER);
         bar.setBackground(Cyber.panelBg(this));
-        TextView logo = Cyber.label(this, land ? "A▲L" : "AMPY▲LINK", land ? 13 : 14, Cyber.CYAN);
+        TextView logo = Cyber.label(this, land ? "A▲R" : "AMPY▲RAW", land ? 13 : 14, Cyber.CYAN);
         logo.setOnLongClickListener(v -> { resetAll(); return true; });
         sourceTag = Cyber.label(this, "", 7, Cyber.DIM);
         sourceTag.setShadowLayer(0, 0, 0, 0);

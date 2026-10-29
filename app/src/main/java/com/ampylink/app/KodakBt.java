@@ -38,9 +38,38 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 @SuppressLint("MissingPermission")
-final class KodakBt {
+final class KodakBt implements PrinterLink {
     static final UUID SPP = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     static final int MIN_JOB = 33792;
+
+    /**
+     * Picks the transport like the KODAK app: LE-only devices ("Kodak Instant-XXXX") use GATT,
+     * the others SPP — and if SPP is refused we fall back to LE.
+     */
+    static PrinterLink openAuto(Context ctx, BluetoothDevice dev, android.content.SharedPreferences sp) throws IOException {
+        String key = "transport_" + dev.getAddress();
+        String pref = sp != null ? sp.getString(key, null) : null;
+        int type;
+        try { type = dev.getType(); } catch (SecurityException e) { type = BluetoothDevice.DEVICE_TYPE_UNKNOWN; }
+        boolean le = "le".equals(pref) || (pref == null && type == BluetoothDevice.DEVICE_TYPE_LE);
+        if (le) {
+            try { return KodakBle.open(ctx, dev); }
+            catch (IOException e) { if ("le".equals(pref) || type == BluetoothDevice.DEVICE_TYPE_LE) throw e; }
+        }
+        try {
+            KodakBt k = open(ctx, dev);
+            if (sp != null) sp.edit().putString(key, "spp").apply();
+            return k;
+        } catch (IOException spp) {
+            try {
+                KodakBle b = KodakBle.open(ctx, dev);
+                if (sp != null) sp.edit().putString(key, "le").apply();
+                return b;
+            } catch (IOException ble) {
+                throw new IOException("Connessione non riuscita (SPP: " + spp.getMessage() + " · BLE: " + ble.getMessage() + ")");
+            }
+        }
+    }
 
     interface Listener {
         /** progress 0..1 (negative = waiting), pass 0..3 while printing (Y, M, C, overcoat) or -1. */
@@ -78,7 +107,7 @@ final class KodakBt {
     static boolean looksLikeKodak(String n) {
         if (n == null) return false;
         String u = n.toUpperCase(Locale.US);
-        return u.contains("KODAK") || u.contains("PICKIT") || u.contains("MINI 2") || u.contains("P210");
+        return u.contains("KODAK") || u.contains("PICKIT") || u.contains("MINI 2") || u.contains("P210") || u.contains("INSTANT");
     }
 
     static List<BluetoothDevice> bondedPrinters(Context c) {
@@ -172,7 +201,7 @@ final class KodakBt {
         }
     }
 
-    void close() {
+    @Override public void close() {
         closed = true;
         link.close();
         if (reader != null) reader.interrupt();
@@ -192,7 +221,7 @@ final class KodakBt {
     // ------------------------------------------------------------------ job
 
     /** Blocking: sends one card and waits for the printer to finish all copies. */
-    void print(byte[] jpeg, int copies, Listener l) throws IOException {
+    @Override public void print(byte[] jpeg, int copies, Listener l) throws IOException {
         final byte[] job = padJob(jpeg);
         boolean jobSent = false, dataStarted = false;
         long sent = 0;
