@@ -650,7 +650,17 @@ public final class GalleryActivity extends Activity {
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-1, -2);
         glp.topMargin = pad;
         root.addView(go, glp);
-        root.addView(Neon.caption(this, "Nome telefono per l'associazione: " + Session.friendlyName(), 8));
+        root.addView(Neon.caption(this, "Nome telefono per l'associazione: " + Session.friendlyName() +
+            "\nDopo un riavvio: sulla fotocamera riapri la connessione allo smartphone e scegli il telefono già registrato, poi tocca COLLEGA.", 8));
+        TextView reset = Cyber.button(this, "RESET ASSOCIAZIONE", Cyber.DIM);
+        reset.setTextColor(Cyber.TEXT);
+        reset.setOnClickListener(v -> {
+            getSharedPreferences("eos", MODE_PRIVATE).edit().remove("guid").remove("ble_paired").apply();
+            Toast.makeText(this, "Nuova identità creata: elimina il telefono dalla fotocamera e ricollega (ti chiederà conferma)", Toast.LENGTH_LONG).show();
+        });
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, -2);
+        rlp.topMargin = pad / 2;
+        root.addView(reset, rlp);
         scan.setOnClickListener(v -> {
             found.removeAllViews();
             TextView s = Neon.caption(this, "RICERCA UPnP/SSDP…", 9);
@@ -783,7 +793,7 @@ public final class GalleryActivity extends Activity {
                     setStatus("◌ RICERCA FOTOCAMERA (UPnP)…");
                     List<Discovery.Found> fl = Discovery.scan(this, n, 2500, h);
                     for (Discovery.Found f : fl) if (f.ip.equals(h) || fl.size() == 1) { h = f.ip; m = f.ccapi && !f.ptpip ? 2 : 1; break; }
-                    if (m == 0) m = portOpen(n, h, 15740) ? 1 : portOpen(n, h, 8080) ? 2 : 1;
+                    if (m == 0) m = 1; // default PTP/IP (Camera Connect); no port probing, it upsets the camera
                 }
                 CanonClient c;
                 if (m == 2) c = new CanonClient.Ccapi(h, n);

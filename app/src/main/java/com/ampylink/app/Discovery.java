@@ -142,7 +142,9 @@ final class Discovery {
     }
 
     private static void probe(Map<String, Found> found, Network net, String ip) {
-        boolean ptp = portOpen(net, ip, 15740, 1500), cc = portOpen(net, ip, 8080, 1500);
+        // never open/close a bare TCP connection on 15740: Canon bodies take it as a failed phone
+        // session, show "cannot connect" and leave the waiting screen. Only harmless HTTP probes.
+        boolean ptp = false, cc = httpOk(net, "http://" + ip + ":8080/ccapi");
         String loc = null;
         if (!ptp && !cc) {
             // camera UPnP description (port 49152 on Canon bodies)

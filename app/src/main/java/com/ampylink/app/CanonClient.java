@@ -224,6 +224,7 @@ abstract class CanonClient {
         private final String friendly;
         private volatile boolean closed;
         private boolean eos;
+        volatile int lastInitFail;
         /** Called while the camera shows its "connect to this device?" prompt. */
         Runnable onAwaitingPairing;
 
@@ -259,7 +260,12 @@ abstract class CanonClient {
                 ack = read();
                 if (ack.type == 2) break;
                 try { cmd.close(); } catch (Exception ignored) {}
-                if (ack.type != 5) throw new IOException("Unexpected PTP/IP reply " + ack.type);
+                if (ack.type != 5) throw new IOException("Risposta PTP/IP inattesa " + ack.type);
+                int reason = ack.payload.length >= 4 ? ack.le().getInt() : 0;
+                lastInitFail = reason;
+                // PTP/IP InitFail: 1 = initiator rejected, 2 = busy (pairing prompt / previous session), 3 = unspecified
+                if (reason == 1)
+                    throw new IOException("La fotocamera rifiuta questo telefono (InitFail " + reason + "). Sulla fotocamera elimina il telefono registrato, poi in AmpyLink tocca RESET ASSOCIAZIONE e ricollega");
                 if (System.currentTimeMillis() > deadline) throw new IOException("Associazione rifiutata: conferma il telefono sul display della fotocamera");
                 if (onAwaitingPairing != null) onAwaitingPairing.run();
                 try { Thread.sleep(2000); } catch (InterruptedException e) { throw new IOException("Interrupted"); }
