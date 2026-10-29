@@ -24,5 +24,6 @@ Ogni pacchetto è fatto così: header `[cmd, p1, p2, p3, lunghezza u32 BE]` + da
 ## Build
 * **Gradle**: `gradle :app:assembleDebug` (c'è anche il workflow GitHub Actions in `.github/workflows/build.yml`).
 * **Senza Gradle**: `SDK_JAR=…/android.jar BT=…/build-tools/34.x ./build-apk.sh`, che usa aapt2, javac, d8 e apksigner.
+* **Senza D8** (dx al suo posto): passa anche `DEXER="java -jar dx.jar" ASM_JAR=asm.jar`. `tools/Desugar.java` converte le lambda in classi normali, perché Android non ha `LambdaMetafactory`. Era la causa del crash all'avvio della 1.0.0.
 
 Licenza GPL v3 (deriva da AmpyRaw / RawTherapee).

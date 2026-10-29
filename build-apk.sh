@@ -13,10 +13,17 @@ SRC="$HERE/app/src/main"
 sed 's|<manifest |<manifest package="com.ampylink.app" |' "$SRC/AndroidManifest.xml" > "$OUT/AndroidManifest.xml"
 "$AAPT2" compile --dir "$SRC/res" -o "$OUT/res/res.zip"
 "$AAPT2" link -o "$OUT/base.apk" -I "$SDK_JAR" --manifest "$OUT/AndroidManifest.xml" \
-  --java "$OUT/gen" --min-sdk-version 30 --target-sdk-version 34 --version-code 1 --version-name 1.0.0 "$OUT/res/res.zip"
+  --java "$OUT/gen" --min-sdk-version 30 --target-sdk-version 34 --version-code 2 --version-name 1.0.1 "$OUT/res/res.zip"
 javac -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$SDK_JAR:$LAMBDA_STUBS" -d "$OUT/classes" \
   $(find "$SRC/java" "$OUT/gen" -name '*.java')
 python3 -I "$HERE/tools/strip_methodparams.py" "$OUT/classes"
+# Android has no LambdaMetafactory: without D8, desugar lambdas into plain classes (needs ASM_JAR)
+if [ -n "${DEXER:-}" ]; then
+  : "${ASM_JAR:?path to asm-7+.jar for lambda desugaring}"
+  mkdir -p "$OUT/tools" && javac -nowarn -cp "$ASM_JAR" -d "$OUT/tools" "$HERE/tools/Desugar.java"
+  java -cp "$ASM_JAR:$OUT/tools" Desugar "$OUT/classes"
+  ! (cd "$OUT/classes" && for c in $(find . -name '*.class'); do javap -c -p "$c"; done) | grep -q invokedynamic || { echo "invokedynamic left after desugar"; exit 1; }
+fi
 if [ -n "${DEXER:-}" ]; then
   $DEXER --dex --min-sdk-version=26 --output="$OUT/dex/classes.dex" "$OUT/classes"
 else
