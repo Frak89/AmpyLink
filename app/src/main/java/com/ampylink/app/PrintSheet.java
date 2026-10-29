@@ -193,6 +193,11 @@ final class PrintSheet {
         sendBtn.setTextSize(14);
         sendBtn.setOnClickListener(v -> startDirect());
         root.addView(sendBtn, new LinearLayout.LayoutParams(-1, -2));
+        TextView logBtn = Cyber.button(a, "LOG", Cyber.YELLOW);
+        logBtn.setOnClickListener(v -> Neon.showLog(a));
+        LinearLayout.LayoutParams lglp = new LinearLayout.LayoutParams(-1, -2);
+        lglp.topMargin = pad / 2;
+        root.addView(logBtn, lglp);
         TextView kodak = Cyber.button(a, "APRI NELL'APP KODAK", Cyber.DIM);
         kodak.setTextColor(Cyber.TEXT);
         kodak.setOnClickListener(v -> sendToKodakApp());
@@ -208,7 +213,10 @@ final class PrintSheet {
 
     private void styleCopies() { copiesLabel.setText(copies + (copies == 1 ? " COPIA" : " COPIE")); }
 
+    private String lastLogged = "";
+
     private void setStatus(String s, float p, int pass) {
+        if (!s.equals(lastLogged) && !s.startsWith("TRASFERIMENTO")) { lastLogged = s; Trace.log("KODAK " + s); }
         ui.post(() -> {
             status.setText("> " + s);
             bar.set(p);
@@ -351,7 +359,7 @@ final class PrintSheet {
             final String nm = name;
             t.setOnClickListener(v -> {
                 sp.edit().putString("printer", dev.getAddress()).putString("printerName", nm).apply();
-                if (dev.getBondState() != BluetoothDevice.BOND_BONDED) try { dev.createBond(); } catch (Exception ignored) {}
+                // no Android bonding: KODAK printers use an unencrypted link (bonding breaks BLE reads)
                 updatePrinterLabel();
                 d.dismiss();
             });

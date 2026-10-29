@@ -45,7 +45,10 @@ final class KodakBle implements PrinterLink {
     static KodakBle open(Context ctx, BluetoothDevice dev) throws IOException {
         final LinkedBlockingQueue<Object[]> q = new LinkedBlockingQueue<>();
         BluetoothGattCallback cb = new BluetoothGattCallback() {
-            @Override public void onConnectionStateChange(BluetoothGatt g, int status, int state) { q.offer(new Object[]{"conn", status, state}); }
+            @Override public void onConnectionStateChange(BluetoothGatt g, int status, int state) {
+                Trace.log("KODAK BLE stato connessione=" + state + " status=" + status);
+                q.offer(new Object[]{"conn", status, state});
+            }
             @Override public void onServicesDiscovered(BluetoothGatt g, int status) { q.offer(new Object[]{"svc", status}); }
             @Override public void onMtuChanged(BluetoothGatt g, int mtu, int status) { q.offer(new Object[]{"mtu", mtu}); }
             @Override public void onCharacteristicRead(BluetoothGatt g, BluetoothGattCharacteristic c, int status) {
@@ -75,6 +78,13 @@ final class KodakBle implements PrinterLink {
                 if (k.st == null && (p & BluetoothGattCharacteristic.PROPERTY_READ) != 0 && x != k.wr && !INFO_A.equals(x.getUuid()) && !INFO_B.equals(x.getUuid())) k.st = x;
             }
             if (k.wr == null || k.st == null) throw new IOException("BLE: caratteristiche stampante mancanti");
+            k.bonded = dev.getBondState() == BluetoothDevice.BOND_BONDED;
+            try { k.name = dev.getName() != null ? dev.getName() : k.name; } catch (SecurityException ignored) {}
+            StringBuilder sb = new StringBuilder("KODAK BLE servizio OK · bond=" + dev.getBondState());
+            for (BluetoothGattCharacteristic x : cs) sb.append(" · ").append(x.getUuid().toString(), 0, 8).append("/p").append(x.getProperties());
+            sb.append(" · write=").append(k.wr.getUuid().toString(), 0, 8).append(" status=").append(k.st.getUuid().toString(), 0, 8);
+            Trace.log(sb.toString());
+            sleep(500);
             return k;
         } catch (IOException e) { k.close(); throw e; }
     }
@@ -94,15 +104,29 @@ final class KodakBle implements PrinterLink {
     }
 
     private byte[] status() throws IOException {
-        for (int i = 0; i < 3; i++) {
+        IOException last = null;
+        for (int i = 0; i < 4; i++) {
             if (gatt.readCharacteristic(st)) {
-                Object[] r = await("read", 5000);
-                if ((Integer) r[1] == BluetoothGatt.GATT_SUCCESS) return (byte[]) r[2];
-            }
-            sleep(200);
+                try {
+                    Object[] r = await("read", 4000);
+                    int code = (Integer) r[1];
+                    if (code == BluetoothGatt.GATT_SUCCESS) return (byte[]) r[2];
+                    Trace.log("KODAK BLE lettura stato → GATT " + code);
+                    if (code == 5 || code == 15) throw new IOException("La stampante richiede un collegamento non cifrato: dissociala in Impostazioni › Bluetooth e riprova");
+                } catch (IOException e) {
+                    last = e;
+                    Trace.log("KODAK BLE lettura stato: " + e.getMessage());
+                    if (e.getMessage() != null && (e.getMessage().contains("disconnessa") || e.getMessage().contains("dissociala"))) throw e;
+                }
+            } else Trace.log("KODAK BLE readCharacteristic rifiutata (operazione in corso)");
+            sleep(400);
         }
-        throw new IOException("BLE: stato stampante non leggibile");
+        throw new IOException(bonded ? "La stampante non risponde: è associata in Android. Vai in Impostazioni › Bluetooth, dissocia «" + name + "» e riprova (non va associata)"
+            : "BLE: stato stampante non leggibile" + (last != null ? " (" + last.getMessage() + ")" : ""));
     }
+
+    private boolean bonded;
+    private String name = "Kodak";
 
     private void write(byte[] v) throws IOException {
         wr.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);

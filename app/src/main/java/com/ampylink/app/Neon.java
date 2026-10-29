@@ -118,6 +118,29 @@ final class Neon {
         return 0xFF000000 | (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
     }
 
+    /** LOG dialog with copy button (connection diagnostics). */
+    static void showLog(Activity a) {
+        Object[] dv = dialog(a, "LOG // CONNESSIONE", true);
+        Dialog d = (Dialog) dv[0];
+        LinearLayout root = (LinearLayout) dv[1];
+        String txt = Trace.text();
+        TextView t = Cyber.label(a, txt.isEmpty() ? "(vuoto)" : txt, 8, Cyber.TEXT);
+        t.setShadowLayer(0, 0, 0, 0);
+        t.setTextIsSelectable(true);
+        t.setLineSpacing(0, 1.2f);
+        root.addView(t);
+        TextView copy = Cyber.button(a, "COPIA LOG", Cyber.MAGENTA);
+        copy.setOnClickListener(v -> {
+            android.content.ClipboardManager cm = a.getSystemService(android.content.ClipboardManager.class);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("AmpyLink log", txt));
+            android.widget.Toast.makeText(a, "Log copiato: incollalo nella chat", android.widget.Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Cyber.dp(a, 10);
+        root.addView(copy, lp);
+        d.show();
+    }
+
     /** A panel-styled dialog; returns {dialog, contentLayout}. */
     static Object[] dialog(Activity a, String title, boolean scroll) {
         Dialog d = new Dialog(a);
