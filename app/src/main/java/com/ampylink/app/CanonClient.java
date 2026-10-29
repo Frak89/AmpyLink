@@ -225,6 +225,16 @@ abstract class CanonClient {
         private volatile boolean closed;
         private boolean eos;
         volatile int lastInitFail;
+        /** GUID byte order on the wire: 0 = big-endian, 1 = reversed (as on BLE), 2 = two little-endian longs. */
+        volatile int guidMode;
+        private int triedModes;
+
+        static byte[] guidWire(UUID g, int mode) {
+            byte[] b = CanonBle.guidBytes(g);
+            if (mode == 1) CanonBle.reverse(b);
+            else if (mode == 2) b = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).putLong(g.getMostSignificantBits()).putLong(g.getLeastSignificantBits()).array();
+            return b;
+        }
         /** Called while the camera shows its "connect to this device?" prompt. */
         Runnable onAwaitingPairing;
 
@@ -256,7 +266,7 @@ abstract class CanonClient {
                 out = cmd.getOutputStream();
                 byte[] name = (friendly + "\0").getBytes(StandardCharsets.UTF_16LE);
                 ByteBuffer b = le(16 + name.length + 4);
-                b.put(CanonBle.guidBytes(guid)).put(name).putInt(0x00010000); // GUID as raw bytes, same as sent over BLE (reversed there)
+                b.put(guidWire(guid, guidMode)).put(name).putInt(0x00010000);
                 Trace.log("PTP/IP → InitCommandRequest " + host + ":15740 name=" + friendly + " guid=" + guid);
                 send(1, b.array());
                 ack = read();
@@ -267,8 +277,11 @@ abstract class CanonClient {
                 int reason = ack.payload.length >= 4 ? ack.le().getInt() : 0;
                 lastInitFail = reason;
                 // PTP/IP InitFail: 1 = initiator rejected, 2 = busy (pairing prompt / previous session), 3 = unspecified
-                if (reason == 1)
-                    throw new IOException("La fotocamera rifiuta questo telefono (InitFail " + reason + "). Sulla fotocamera elimina il telefono registrato, poi in AmpyLink tocca RESET ASSOCIAZIONE e ricollega");
+                if (reason == 1) {
+                    // rejected: try the other byte orders of the same GUID before giving up
+                    if (++triedModes < 3) { guidMode = (guidMode + 1) % 3; Trace.log("PTP/IP: GUID rifiutato, provo codifica " + guidMode); continue; }
+                    throw new IOException("Associazione richiesta: la fotocamera non riconosce AmpyLink (è registrata un'altra app). In LINK tocca ASSOCIA AMPYLINK con la fotocamera su «Aggiungi dispositivo»: una sola conferma, poi più niente.");
+                }
                 if (System.currentTimeMillis() > deadline) throw new IOException("Associazione rifiutata: conferma il telefono sul display della fotocamera");
                 if (onAwaitingPairing != null) onAwaitingPairing.run();
                 try { Thread.sleep(2000); } catch (InterruptedException e) { throw new IOException("Interrupted"); }

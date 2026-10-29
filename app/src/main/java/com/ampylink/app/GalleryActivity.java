@@ -658,6 +658,20 @@ public final class GalleryActivity extends Activity {
         root.addView(svcChip, svlp);
         root.addView(Neon.caption(this, "⚠ Se sul telefono c'è Canon Camera Connect, chiudilo (Impostazioni › App › Camera Connect › Forza arresto): tiene occupata la fotocamera via Bluetooth e AmpyLink non riesce a collegarsi. " +
             "Sulla R6 II lascia attivo il Bluetooth (Impostazioni wireless › Bluetooth) così si può svegliare anche da spenta.", 8));
+        TextView pairBtn = Cyber.button(this, "ASSOCIA AMPYLINK (UNA VOLTA SOLA)", Cyber.MAGENTA);
+        pairBtn.setOnClickListener(v -> {
+            if (!PrintSheet.ensureBt(this)) return;
+            String mac = sp.getString("ble_mac", null);
+            if (mac == null) { Toast.makeText(this, "Prima tocca CERCA FOTOCAMERA VIA BLUETOOTH", Toast.LENGTH_LONG).show(); return; }
+            d.dismiss();
+            forcePair = true;
+            CameraLinkService.stop(this); // free the Bluetooth link for the pairing
+            try { bleLink(KodakBt.adapter(this).getRemoteDevice(mac), sp.getString("ble_name", "EOS")); } catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+        LinearLayout.LayoutParams pblp = new LinearLayout.LayoutParams(-1, -2);
+        pblp.topMargin = pad / 2;
+        root.addView(pairBtn, pblp);
+        root.addView(Neon.caption(this, "Serve se il LOG dice «InitFail reason=1»: la fotocamera conosce solo l'app con cui è stata associata. Sulla R6 II apri Connetti a smartphone › Aggiungi dispositivo, poi tocca qui e conferma «" + Session.friendlyName() + "» sul display. Dopo, non serve più nessuna conferma.", 8));
         TextView bleScan = Cyber.button(this, "CERCA FOTOCAMERA VIA BLUETOOTH", Cyber.CYAN);
         bleScan.setOnClickListener(v -> { if (PrintSheet.ensureBt(this)) { d.dismiss(); bleScanDialog(); } });
         LinearLayout.LayoutParams blp2 = new LinearLayout.LayoutParams(-1, -2);
@@ -701,6 +715,7 @@ public final class GalleryActivity extends Activity {
         ip.setBackground(g);
         ip.setPadding(pad, pad, pad, pad);
         String last = sp.getString("ip", null);
+        if (last != null && !last.startsWith("192.168.")) last = null; // never a mobile-network address
         ip.setText(last != null ? last : gatewayIp());
         row.addView(ip, new LinearLayout.LayoutParams(0, -2, 1));
         TextView scan = Cyber.button(this, "CERCA", Cyber.CYAN);
@@ -811,13 +826,17 @@ public final class GalleryActivity extends Activity {
     }
 
     /** BLE pairing/handshake → camera starts Wi-Fi AP → Android joins it → PTP/IP over that network. */
+    private boolean forcePair;
+
     private void bleLink(android.bluetooth.BluetoothDevice dev, String name) {
         if (linking) return;
         linking = true;
         phoneTab = false;
         linkBtn.setText("…");
         rebuild();
-        final boolean first = !dev.getAddress().equals(sp.getString("ble_paired", null));
+        final boolean first = forcePair || !dev.getAddress().equals(sp.getString("ble_paired", null));
+        final boolean force = forcePair;
+        forcePair = false;
         new Thread(() -> {
             try {
                 CanonBle.Ap ap;
@@ -830,11 +849,13 @@ public final class GalleryActivity extends Activity {
                         Thread.sleep(1000);
                     }
                 }
+                if (force) svc = null;
                 if (svc != null) {
                     setStatus("◌ BLUETOOTH GIÀ COLLEGATO (SERVIZIO) · RICHIESTA WI-FI…");
                     ap = svc.requestWifi(s -> setStatus("◌ " + s));
                 } else {
                     CanonBle ble = new CanonBle(this, dev);
+                    ble.forcePair = force;
                     ap = ble.connectAndStartWifi(first, Session.guid(this), Session.friendlyName(), s -> setStatus("◌ " + s));
                     Session.ble = ble;
                 }
@@ -889,6 +910,7 @@ public final class GalleryActivity extends Activity {
         Session.camIo.execute(() -> {
             try {
                 Network n = forced != null ? forced : wifiNetwork();
+                if (n == null) throw new java.io.IOException("Il telefono non è collegato al Wi-Fi della fotocamera (usa il collegamento Bluetooth, che lo fa da solo)");
                 int m = mode;
                 String h = host;
                 if (m == 0) {
@@ -901,6 +923,7 @@ public final class GalleryActivity extends Activity {
                 if (m == 2) c = new CanonClient.Ccapi(h, n);
                 else {
                     CanonClient.PtpIp p = new CanonClient.PtpIp(h, n, Session.guid(this), Session.friendlyName());
+                    p.guidMode = sp.getInt("guid_mode", 0);
                     p.onAwaitingPairing = () -> setStatus("◌ FOTOCAMERA OCCUPATA, RIPROVO… (se compare una richiesta sul display, accettala)");
                     c = p;
                 }
@@ -910,7 +933,7 @@ public final class GalleryActivity extends Activity {
                 while (true) {
                     try { c.connect(); break; }
                     catch (java.io.IOException e) {
-                        if (System.currentTimeMillis() > until || (e.getMessage() != null && e.getMessage().startsWith("Associazione"))) throw e;
+                        if (System.currentTimeMillis() > until || (e.getMessage() != null && (e.getMessage().startsWith("Associazione") || e.getMessage().contains("EPERM")))) throw e;
                         setStatus("◌ ATTESA WI-FI FOTOCAMERA…");
                         Thread.sleep(2000);
                         if (m == 2) c = new CanonClient.Ccapi(h, n);
@@ -918,6 +941,7 @@ public final class GalleryActivity extends Activity {
                     }
                 }
                 final CanonClient cc = c;
+                if (cc instanceof CanonClient.PtpIp) sp.edit().putInt("guid_mode", ((CanonClient.PtpIp) cc).guidMode).apply();
                 Session.client = cc;
                 setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA…");
                 synchronized (scanItems) { scanItems.clear(); }

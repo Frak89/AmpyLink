@@ -94,6 +94,8 @@ final class CanonBle {
     private final LinkedBlockingQueue<Object[]> ops = new LinkedBlockingQueue<>();     // op completions
     private final LinkedBlockingQueue<Object[]> events = new LinkedBlockingQueue<>();  // notifications
     private volatile int connState = -1;
+    /** Ask the camera to register AmpyLink even if the phone is already bonded (one confirmation). */
+    volatile boolean forcePair;
 
     CanonBle(Context ctx, BluetoothDevice dev) { this.ctx = ctx.getApplicationContext(); this.dev = dev; }
 
@@ -263,19 +265,20 @@ final class CanonBle {
         subscribe(opt(SVC_WAP, CH_WAP_CP));
         subscribe(opt(SVC_WAP, CH_WAP_STATUS));
 
-        if (firstPairing && wasBonded) Trace.log("BLE: già associata al telefono → nessuna richiesta di conferma, passo al Wi-Fi");
-        if (firstPairing && pair != null && !wasBonded) {
+        if (firstPairing && wasBonded && !forcePair) Trace.log("BLE: già associata al telefono → nessuna richiesta di conferma, passo al Wi-Fi");
+        if (forcePair) Trace.log("BLE: associazione AmpyLink richiesta (fotocamera su «Aggiungi dispositivo»)");
+        if (pair != null && ((firstPairing && !wasBonded) || forcePair)) {
             st.on("CONFERMA «" + phoneName + "» SUL DISPLAY DELLA FOTOCAMERA…");
             boolean ok = false;
             try {
                 write(pair, concat(new byte[]{1}, ascii(phoneName)));
                 // already bonded (e.g. by Camera Connect): don't block on a prompt that may never come
-                byte[] r = event(CH_PAIR, wasBonded ? 12000 : 90000);
+                byte[] r = event(CH_PAIR, wasBonded && !forcePair ? 12000 : 90000);
                 Trace.log("BLE pairing → " + (r == null ? "nessuna risposta" : "risposta " + (r.length > 0 ? r[0] : -1)));
                 if (r != null && r.length > 0 && r[0] == 2) ok = true;
-                else if (!wasBonded) throw new IOException(r == null ? "Associazione non confermata sulla fotocamera" : "Associazione rifiutata dalla fotocamera (" + (r.length > 0 ? r[0] : -1) + ")");
+                else if (!wasBonded || forcePair) throw new IOException(r == null ? "Associazione non confermata sulla fotocamera" : "Associazione rifiutata dalla fotocamera (" + (r.length > 0 ? r[0] : -1) + ")");
             } catch (IOException e) {
-                if (!wasBonded) throw e;
+                if (!wasBonded || forcePair) throw e;
                 Trace.log("BLE pairing saltato (già associata): " + e.getMessage());
             }
             if (!ok) st.on("BLUETOOTH · FOTOCAMERA GIÀ ASSOCIATA, PROSEGUO…");
