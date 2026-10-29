@@ -664,6 +664,10 @@ public final class GalleryActivity extends Activity {
             String mac = sp.getString("ble_mac", null);
             if (mac == null) { Toast.makeText(this, "Prima tocca CERCA FOTOCAMERA VIA BLUETOOTH", Toast.LENGTH_LONG).show(); return; }
             d.dismiss();
+            try {
+                android.bluetooth.BluetoothDevice bd = KodakBt.adapter(this).getRemoteDevice(mac);
+                if (bd.getBondState() == android.bluetooth.BluetoothDevice.BOND_BONDED) { unpairFirstDialog(sp.getString("ble_name", "EOS")); return; }
+            } catch (Exception ignored) {}
             forcePair = true;
             CameraLinkService.stop(this); // free the Bluetooth link for the pairing
             try { bleLink(KodakBt.adapter(this).getRemoteDevice(mac), sp.getString("ble_name", "EOS")); } catch (Exception e) { Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show(); }
@@ -716,7 +720,9 @@ public final class GalleryActivity extends Activity {
         ip.setPadding(pad, pad, pad, pad);
         String last = sp.getString("ip", null);
         if (last != null && !last.startsWith("192.168.")) last = null; // never a mobile-network address
-        ip.setText(last != null ? last : gatewayIp());
+        String gw = gatewayIp();
+        if (!gw.startsWith("192.168.")) gw = "192.168.1.2";
+        ip.setText(last != null ? last : gw);
         row.addView(ip, new LinearLayout.LayoutParams(0, -2, 1));
         TextView scan = Cyber.button(this, "CERCA", Cyber.CYAN);
         row.addView(scan, Neon.wrap(pad / 2));
@@ -827,6 +833,29 @@ public final class GalleryActivity extends Activity {
 
     /** BLE pairing/handshake → camera starts Wi-Fi AP → Android joins it → PTP/IP over that network. */
     private boolean forcePair;
+
+    /** The camera's "Add device" only accepts a phone that is NOT bonded yet: guide the user to forget it. */
+    private void unpairFirstDialog(String camName) {
+        Object[] dv = Neon.dialog(this, "ASSOCIA AMPYLINK // 3 PASSI", true);
+        Dialog d = (Dialog) dv[0];
+        LinearLayout root = (LinearLayout) dv[1];
+        root.addView(Neon.caption(this,
+            "Il telefono è ancora associato via Bluetooth a " + camName + " (associazione di Camera Connect): in «Aggiungi dispositivo» la fotocamera cerca un telefono nuovo, per questo dice «Connection target not found».\n\n" +
+            "1 · Sulla fotocamera: Impostazioni wireless › Connessione Wi-Fi/Bluetooth › Smartphone: elimina il telefono registrato (oppure «Reimposta impostazioni comunicazione»).\n" +
+            "2 · Sul telefono: tocca qui sotto, apri " + camName + " e scegli DISSOCIA.\n" +
+            "3 · Sulla fotocamera: Connetti a smartphone › Aggiungi dispositivo › Android. Poi in AmpyLink: LINK › CERCA FOTOCAMERA VIA BLUETOOTH › tocca la fotocamera e conferma sul display.\n\n" +
+            "Fatto una volta, AmpyLink si collega da solo senza altre conferme.", 9));
+        TextView open = Cyber.button(this, "APRI IMPOSTAZIONI BLUETOOTH", Cyber.MAGENTA);
+        open.setOnClickListener(v -> {
+            sp.edit().remove("ble_paired").putInt("guid_mode", 0).apply();
+            try { startActivity(new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)); } catch (Exception ignored) {}
+            d.dismiss();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Cyber.dp(this, 12);
+        root.addView(open, lp);
+        d.show();
+    }
 
     private void bleLink(android.bluetooth.BluetoothDevice dev, String name) {
         if (linking) return;
