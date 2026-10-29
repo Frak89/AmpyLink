@@ -8,7 +8,7 @@ android {
         minSdk = 30          // Android 11+
         targetSdk = 34
         versionCode = 3
-        versionName = "1.0.2"
+        versionName = "1.1.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
