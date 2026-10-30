@@ -25,8 +25,10 @@ final class Cyber {
 
     static int dp(Context c, float v) { return Math.round(v * c.getResources().getDisplayMetrics().density); }
 
-    static TextView label(Context c, String s, float sp, int color) {
-        TextView t = new TextView(c);
+    static TextView label(Context c, String s, float sp, int color) { return style(new TextView(c), s, sp, color); }
+
+    static TextView style(TextView t, String s, float sp, int color) {
+        Context c = t.getContext();
         t.setText(s);
         t.setTextSize(sp);
         t.setTypeface(MONO);
@@ -39,7 +41,7 @@ final class Cyber {
 
     /** Chamfered neon button. */
     static TextView button(Context c, String s, int color) {
-        TextView t = label(c, s, 11, color);
+        TextView t = style(new BlinkButton(c, color), s, 11, color);
         t.setGravity(Gravity.CENTER);
         int ph = dp(c, 10), pv = dp(c, 8);
         t.setPadding(ph, pv, ph, pv);
@@ -155,6 +157,41 @@ final class Cyber {
                     return true;
             }
             return super.onTouchEvent(e);
+        }
+    }
+
+    /**
+     * macOS-style "blink" on selection: the button flashes filled twice, then its action runs.
+     */
+    static final class BlinkButton extends TextView {
+        private final int color;
+        private boolean blinking;
+
+        BlinkButton(Context c, int color) { super(c); this.color = color; }
+
+        @Override public boolean performClick() {
+            if (blinking) return true;
+            if (!hasOnClickListeners()) return super.performClick();
+            blinking = true;
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            final android.graphics.drawable.Drawable bg = getBackground();
+            final android.content.res.ColorStateList fg = getTextColors();
+            final GradientDrawable on = new GradientDrawable();
+            on.setColor(color);
+            float r = dp(getContext(), 8);
+            on.setCornerRadii(new float[]{0, 0, r, r, 0, 0, r, r});
+            final int[] step = {0};
+            final Runnable[] tick = new Runnable[1];
+            tick[0] = () -> {
+                boolean lit = step[0] % 2 == 0;
+                setBackground(lit ? on : bg);
+                if (lit) setTextColor(BG); else setTextColor(fg);
+                step[0]++;
+                if (step[0] < 4) postDelayed(tick[0], 55);
+                else postDelayed(() -> { setBackground(bg); setTextColor(fg); blinking = false; BlinkButton.super.performClick(); }, 40);
+            };
+            tick[0].run();
+            return true;
         }
     }
 

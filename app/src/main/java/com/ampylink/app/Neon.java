@@ -32,7 +32,7 @@ final class Neon {
 
     /** Toggle chip: selected = filled + bright, otherwise dim outline. */
     static TextView chip(Context c, String s, int color) {
-        TextView t = Cyber.label(c, s, 10, color);
+        TextView t = Cyber.style(new Cyber.BlinkButton(c, color), s, 10, color);
         t.setGravity(Gravity.CENTER);
         int p = Cyber.dp(c, 8);
         t.setPadding(p + 2, p - 1, p + 2, p - 1);
@@ -166,6 +166,13 @@ final class Neon {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             d.getWindow().setLayout(Math.min(a.getResources().getDisplayMetrics().widthPixels - pad * 2, Cyber.dp(a, 440)), ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+        // open like a macOS sheet: quick zoom + fade
+        final View anim = scroll ? (View) root.getParent() : root;
+        d.setOnShowListener(x -> {
+            anim.setAlpha(0f); anim.setScaleX(0.86f); anim.setScaleY(0.86f);
+            anim.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        });
         return new Object[]{d, root};
     }
 }
