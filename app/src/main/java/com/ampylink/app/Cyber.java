@@ -167,7 +167,65 @@ final class Cyber {
         private final int color;
         private boolean blinking;
 
-        BlinkButton(Context c, int color) { super(c); this.color = color; }
+        BlinkButton(Context c, int color) {
+            super(c);
+            this.color = color;
+            setHorizontalFadingEdgeEnabled(true);
+            setFadingEdgeLength(dp(c, 14));
+        }
+
+        // ---- ping-pong marquee: labels that don't fit glide right ↔ left with a pause at each end
+        private boolean marquee;
+        private int overflow, savedGravity = -1;
+        private final long t0 = System.currentTimeMillis() + (long) (Math.random() * 800);
+
+        @Override public void setText(CharSequence text, BufferType type) {
+            boolean multi = text != null && text.toString().indexOf('\n') >= 0;
+            setSingleLine(!multi);
+            if (!multi) { setEllipsize(null); setHorizontallyScrolling(true); }
+            super.setText(text, type);
+            post(this::checkOverflow);
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) { super.onSizeChanged(w, h, ow, oh); checkOverflow(); }
+
+        private void checkOverflow() {
+            CharSequence t = getText();
+            if (t == null || t.toString().indexOf('\n') >= 0 || getWidth() == 0) { stopMarquee(); return; }
+            int avail = getWidth() - getPaddingLeft() - getPaddingRight();
+            int tw = (int) Math.ceil(getPaint().measureText(t.toString()));
+            if (tw > avail + 1) {
+                overflow = tw - avail;
+                if (!marquee) { savedGravity = getGravity(); setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL); }
+                marquee = true;
+                invalidate();
+            } else stopMarquee();
+        }
+
+        private void stopMarquee() {
+            if (!marquee) return;
+            marquee = false;
+            if (savedGravity != -1) setGravity(savedGravity);
+            setScrollX(0);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            if (marquee && !blinking) {
+                float speed = dp(getContext(), 30) / 1000f;             // px per ms
+                long travel = (long) (overflow / speed), pause = 1100, cycle = 2 * (travel + pause);
+                long t = Math.max(0, System.currentTimeMillis() - t0) % cycle;
+                float x;
+                if (t < pause) x = 0;
+                else if (t < pause + travel) x = ease((t - pause) / (float) travel) * overflow;
+                else if (t < 2 * pause + travel) x = overflow;
+                else x = (1 - ease((t - 2 * pause - travel) / (float) travel)) * overflow;
+                if (Math.round(x) != getScrollX()) setScrollX(Math.round(x));
+                postInvalidateOnAnimation();
+            }
+            super.onDraw(c);
+        }
+
+        private static float ease(float t) { return t < 0.5f ? 2 * t * t : 1 - (float) Math.pow(-2 * t + 2, 2) / 2; }
 
         @Override public boolean performClick() {
             if (blinking) return true;
