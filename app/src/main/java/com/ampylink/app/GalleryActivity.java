@@ -86,7 +86,8 @@ public final class GalleryActivity extends Activity {
         rebuild();
         if (Session.client == null && Session.shots.isEmpty()) showEmpty();
         if (CameraLinkService.enabled(this)) CameraLinkService.start(this);
-        ui.postDelayed(this::autoConnect, 600);
+        nextAuto = System.currentTimeMillis() + 600;
+        ui.postDelayed(watchdog, 700);
     }
 
     // ------------------------------------------------------------------ UI
@@ -107,7 +108,9 @@ public final class GalleryActivity extends Activity {
         row1.setGravity(Gravity.CENTER_VERTICAL);
         TextView logo = Cyber.label(this, "AMPY▲LINK", 16, Cyber.CYAN);
         row1.addView(logo);
-        row1.addView(Neon.spacer(this));
+        linkStatus = new LinkStatusView(this, statusSource);
+        row1.addView(linkStatus, new LinearLayout.LayoutParams(0, -2, 1));
+        linkStatus.setOnClickListener(v -> Neon.showLog(this));
         TextView prn = Cyber.button(this, "PRN", Cyber.YELLOW);
         prn.setOnClickListener(v -> printSelectionOrHint());
         row1.addView(prn, Neon.wrap(pad / 2));
@@ -214,7 +217,71 @@ public final class GalleryActivity extends Activity {
         getWindow().setDecorFitsSystemWindows(false);
     }
 
-    private void setStatus(String s) { Session.log(s); ui.post(() -> statusLine.setText(s)); }
+    private void setStatus(String s) {
+        Session.log(s);
+        String u = s.toUpperCase(Locale.ITALIAN);
+        if (u.contains("BLUETOOTH") || u.contains("SERVIZIO")) phase = 1;
+        else if (u.contains("WI-FI") && !u.contains("PTP")) phase = 2;
+        else if (u.contains("PTP") || u.contains("HANDSHAKE") || u.contains("LINK ") || u.contains("LETTURA")) phase = 3;
+        ui.post(() -> statusLine.setText(s));
+    }
+
+    // ------------------------------------------------------------------ live link status + auto-reconnect
+    private LinkStatusView linkStatus;
+    private volatile int phase;          // what `linking` is busy with: 1 BT, 2 Wi-Fi, 3 PTP
+    private long nextAuto;
+
+    private final LinkStatusView.Source statusSource = new LinkStatusView.Source() {
+        @Override public int bt() {
+            String mac = sp.getString("ble_mac", null);
+            boolean on = (mac != null && CameraLinkService.linked(mac) != null) || (Session.ble != null && Session.ble.isConnected());
+            if (on) return LinkStatusView.ON;
+            if (linking && phase == 1) return LinkStatusView.LINKING;
+            if (mac != null && CameraLinkService.enabled(GalleryActivity.this) && CameraLinkService.ble == null) return LinkStatusView.LINKING;
+            return LinkStatusView.OFF;
+        }
+        @Override public int wifi() {
+            CanonClient c = Session.client;
+            if (Session.wifiNet != null || (c != null && !c.broken)) return LinkStatusView.ON;
+            if (linking && phase == 2) return LinkStatusView.LINKING;
+            return c != null && c.broken ? LinkStatusView.ERROR : LinkStatusView.OFF;
+        }
+        @Override public int ptp() {
+            CanonClient c = Session.client;
+            if (c != null) return c.broken ? LinkStatusView.ERROR : LinkStatusView.ON;
+            return linking && phase == 3 ? LinkStatusView.LINKING : LinkStatusView.OFF;
+        }
+        @Override public String label() {
+            CanonClient c = Session.client;
+            if (c != null && !c.broken) {
+                long age = (System.currentTimeMillis() - c.lastOk) / 1000;
+                return (c.cameraName.isEmpty() ? "EOS" : c.cameraName.toUpperCase(Locale.US)) + " · " + c.mode() + " · " + (age <= 1 ? "LIVE" : age + "s");
+            }
+            if (c != null) return "CONNESSIONE PERSA · RICOLLEGAMENTO…";
+            if (linking) return "COLLEGAMENTO IN CORSO…";
+            String st = CameraLinkService.state;
+            return sp.getString("ble_mac", null) != null ? (st.isEmpty() ? "IN ATTESA DELLA FOTOCAMERA" : st.toUpperCase(Locale.ITALIAN)) : "NESSUNA FOTOCAMERA · TOCCA LINK";
+        }
+    };
+
+    /** Every 2 s: drop a dead link (camera off, Wi-Fi lost) keeping the gallery, and reconnect by itself. */
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            CanonClient c = Session.client;
+            long now = System.currentTimeMillis();
+            if (c != null && c.broken && !linking) {
+                Trace.log("watchdog: collegamento perso, ricollego");
+                Session.client = null;
+                Session.camIo.execute(c::close);
+                CanonBle b = Session.ble; Session.ble = null; if (b != null) b.close();
+                setStatus("◌ CONNESSIONE PERSA · RICOLLEGAMENTO AUTOMATICO…");
+                updateStatusIdle();
+                nextAuto = now + 2500;
+            }
+            if (Session.client == null && !linking && now >= nextAuto) { nextAuto = now + 20000; autoConnect(); }
+            if (alive) ui.postDelayed(this, 2000);
+        }
+    };
 
     /** LOG: the full connection sequence, copyable, to see exactly where it stops. */
     private void showLog() {
@@ -243,7 +310,15 @@ public final class GalleryActivity extends Activity {
     private void autoConnect() {
         if (Session.client != null || linking || !sp.getBoolean("ble_auto", true)) return;
         String mac = sp.getString("ble_mac", null), name = sp.getString("ble_name", "EOS");
-        if (mac == null || sp.getString("ble_paired", null) == null) return;
+        if (mac == null || sp.getString("ble_paired", null) == null) {
+            // no Bluetooth pairing: if we already linked over this camera Wi-Fi, reconnect directly
+            String ip = sp.getString("ip", null);
+            if (sp.getBoolean("wifi_ok", false) && ip != null && wifiNetwork() != null && ip.equals(gatewayIp())) {
+                Session.log("AUTO-COLLEGA via Wi-Fi → " + ip);
+                link(ip, sp.getInt("mode", 1) == 2 ? 2 : 1);
+            }
+            return;
+        }
         if (android.os.Build.VERSION.SDK_INT >= 31 && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
         android.bluetooth.BluetoothAdapter ad = KodakBt.adapter(this);
         if (ad == null || !ad.isEnabled()) return;
@@ -577,7 +652,7 @@ public final class GalleryActivity extends Activity {
         @Override public void run() {
             CanonClient c = Session.client;
             if (c != null && !linking && thumbQueue.isEmpty()) Session.camIo.execute(c::keepAlive);
-            if (alive) ui.postDelayed(this, 8000);
+            if (alive) ui.postDelayed(this, 5000);
         }
     };
 
@@ -888,6 +963,7 @@ public final class GalleryActivity extends Activity {
                     ap = ble.connectAndStartWifi(first, Session.guid(this), Session.friendlyName(), s -> setStatus("◌ " + s));
                     Session.ble = ble;
                 }
+                if (!sp.contains("svc_on")) ui.post(() -> CameraLinkService.start(this)); // automatic from now on
                 sp.edit().putString("ble_mac", dev.getAddress()).putString("ble_name", name).putString("ble_paired", dev.getAddress())
                     .putString("ip", ap.ip).putInt("mode", 1).apply();
                 setStatus("◌ WI-FI " + ap.ssid + " · CONFERMA LA RETE NEL POPUP DI ANDROID…");
@@ -971,6 +1047,8 @@ public final class GalleryActivity extends Activity {
                 }
                 final CanonClient cc = c;
                 if (cc instanceof CanonClient.PtpIp) sp.edit().putInt("guid_mode", ((CanonClient.PtpIp) cc).guidMode).apply();
+                sp.edit().putBoolean("wifi_ok", true).putString("ip", h).apply();
+                Session.resetThumbFailures();
                 Session.client = cc;
                 setStatus("◉ " + cc.cameraName + " · LETTURA SCHEDA…");
                 synchronized (scanItems) { scanItems.clear(); }

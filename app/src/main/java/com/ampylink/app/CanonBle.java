@@ -383,7 +383,8 @@ final class CanonBle {
         ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
         final boolean[] fired = {false};
         ConnectivityManager.NetworkCallback ncb = new ConnectivityManager.NetworkCallback() {
-            @Override public void onAvailable(Network n) { if (!fired[0]) { fired[0] = true; done.on(n, null); } }
+            @Override public void onAvailable(Network n) { Session.wifiNet = n; if (!fired[0]) { fired[0] = true; done.on(n, null); } }
+            @Override public void onLost(Network n) { if (n.equals(Session.wifiNet)) Session.wifiNet = null; Trace.log("Wi-Fi fotocamera perso"); }
             @Override public void onUnavailable() { if (!fired[0]) { fired[0] = true; done.on(null, "Connessione al Wi-Fi " + ap.ssid + " non riuscita o annullata"); } }
         };
         cm.requestNetwork(req, ncb, 60000);

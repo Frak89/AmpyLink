@@ -75,6 +75,9 @@ abstract class CanonClient {
     abstract void close();
     /** Periodic keep-alive while idle; may refresh nothing. */
     void keepAlive() {}
+    /** Last successful exchange with the camera (live status) and whether the link has died. */
+    volatile long lastOk = System.currentTimeMillis();
+    volatile boolean broken;
 
     static boolean isImage(String n) {
         String u = n.toUpperCase(Locale.US);
@@ -104,11 +107,17 @@ abstract class CanonClient {
             return c;
         }
 
+        @Override void keepAlive() {
+            try { getJson(contents); } catch (Exception e) { if (System.currentTimeMillis() - lastOk > 15000) broken = true; }
+        }
+
         private JSONObject getJson(String url) throws IOException {
             HttpURLConnection c = open(url);
             try {
                 if (c.getResponseCode() / 100 != 2) throw new IOException("HTTP " + c.getResponseCode() + " " + url);
-                return new JSONObject(new String(readAll(c.getInputStream()), StandardCharsets.UTF_8));
+                JSONObject o = new JSONObject(new String(readAll(c.getInputStream()), StandardCharsets.UTF_8));
+                lastOk = System.currentTimeMillis();
+                return o;
             } catch (org.json.JSONException e) { throw new IOException(e); } finally { c.disconnect(); }
         }
 
@@ -434,6 +443,7 @@ abstract class CanonClient {
         @Override void keepAlive() {
             if (closed) return;
             try { if (eos) op(0x9116, null); else op(0x1014, null, 0x5001); } catch (Exception ignored) {}
+            if (System.currentTimeMillis() - lastOk > 20000) broken = true;
         }
 
         @Override void close() {
@@ -481,6 +491,18 @@ abstract class CanonClient {
 
         private synchronized Response opStream(int code, OutputStream sink, Progress prog, int... params) throws IOException {
             if (closed) throw new IOException("Fotocamera scollegata");
+            try {
+                Response r = opStreamRaw(code, sink, prog, params);
+                lastOk = System.currentTimeMillis();
+                return r;
+            } catch (IOException e) {
+                // a dead socket (camera off, Wi-Fi lost) — not a PTP error code
+                if (!(e.getMessage() != null && e.getMessage().startsWith("PTP/IP packet"))) { broken = true; Trace.log("PTP/IP collegamento perso: " + e.getMessage()); }
+                throw e;
+            }
+        }
+
+        private Response opStreamRaw(int code, OutputStream sink, Progress prog, int... params) throws IOException {
             int t = ++tid;
             ByteBuffer b = le(4 + 2 + 4 + 4 * params.length);
             b.putInt(1).putShort((short) code).putInt(t);

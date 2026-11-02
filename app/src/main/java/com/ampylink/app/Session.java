@@ -68,6 +68,8 @@ final class Session {
     static String logText() { return Trace.text(); }
 
     static volatile CanonClient client;
+    /** Camera access point joined via Bluetooth handover (null when not joined / lost). */
+    static volatile android.net.Network wifiNet;
     static final List<Shot> shots = Collections.synchronizedList(new ArrayList<>());
     static final List<Shot> localShots = Collections.synchronizedList(new ArrayList<>());
     static final ExecutorService camIo = Executors.newSingleThreadExecutor();     // full transfers
@@ -139,6 +141,8 @@ final class Session {
 
     static File thumbFile(Context c, Shot s) { File d = new File(c.getFilesDir(), "thumbs"); d.mkdirs(); return new File(d, cacheId(s) + ".jpg"); }
     static File previewFile(Context c, Shot s, int max) { File d = new File(c.getFilesDir(), "previews"); d.mkdirs(); return new File(d, cacheId(s) + "_" + max + ".jpg"); }
+
+    static void resetThumbFailures() { thumbFails.clear(); }
 
     static boolean thumbGaveUp(Shot s) { Integer n = thumbFails.get(s.key()); return n != null && n >= 2; }
 
@@ -423,6 +427,7 @@ final class Session {
         CanonBle b = ble; ble = null;
         if (b != null) b.close();
         android.net.ConnectivityManager.NetworkCallback n = netCb; netCb = null;
+        wifiNet = null;
         if (n != null && appCtx != null) try { appCtx.getSystemService(android.net.ConnectivityManager.class).unregisterNetworkCallback(n); } catch (Exception ignored) {}
     }
 }

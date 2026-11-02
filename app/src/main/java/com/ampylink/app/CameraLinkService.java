@@ -30,7 +30,11 @@ public final class CameraLinkService extends Service {
     private volatile boolean running;
     private Thread worker;
 
-    static boolean enabled(Context c) { return c.getSharedPreferences("eos", MODE_PRIVATE).getBoolean("svc_on", false); }
+    /** On by default as soon as a camera has been paired: no manual setup. */
+    static boolean enabled(Context c) {
+        android.content.SharedPreferences sp = c.getSharedPreferences("eos", MODE_PRIVATE);
+        return sp.getBoolean("svc_on", sp.getString("ble_paired", null) != null);
+    }
 
     static void start(Context c) {
         Intent i = new Intent(c, CameraLinkService.class);
