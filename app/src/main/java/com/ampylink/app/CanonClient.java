@@ -145,12 +145,16 @@ abstract class CanonClient {
         @Override List<Item> list(Progress prog) throws IOException {
             List<Item> out = new ArrayList<>();
             for (String storage : paths(getJson(contents))) {
-                for (String dir : paths(getJson(abs(storage)))) {
+                List<String> dirs = paths(getJson(abs(storage)));
+                java.util.Collections.reverse(dirs); // newest folder first
+                for (String dir : dirs) {
                     String folder = dir.substring(dir.lastIndexOf('/') + 1);
                     JSONObject num = getJson(abs(dir) + "?kind=number");
                     int pages = Math.max(1, num.optInt("pagenumber", 1));
-                    for (int p = 1; p <= pages; p++) {
-                        for (String f : paths(getJson(abs(dir) + "?page=" + p))) {
+                    for (int p = pages; p >= 1; p--) { // last page = newest files
+                        List<String> files = paths(getJson(abs(dir) + "?page=" + p));
+                        java.util.Collections.reverse(files);
+                        for (String f : files) {
                             String name = f.substring(f.lastIndexOf('/') + 1);
                             if (!isImage(name)) continue;
                             Item it = new Item(name, abs(f), 0, -1);
@@ -366,9 +370,12 @@ abstract class CanonClient {
             Response h = op(0x1007, null, storage, 0, parent); // GetObjectHandles
             if (h.code != OK || h.data.length < 4) return;
             ByteBuffer hb = ByteBuffer.wrap(h.data).order(ByteOrder.LITTLE_ENDIAN);
-            int n = hb.getInt();
-            for (int i = 0; i < n && hb.remaining() >= 4; i++) {
-                int handle = hb.getInt();
+            int n = Math.min(hb.getInt(), hb.remaining() / 4);
+            int[] handles = new int[n];
+            for (int i = 0; i < n; i++) handles[i] = hb.getInt();
+            // newest first: handles (and folders 100CANON → 1xxCANON) grow with shooting order
+            for (int i = n - 1; i >= 0; i--) {
+                int handle = handles[i];
                 Response info = op(0x1008, null, handle); // GetObjectInfo
                 if (info.code != OK || info.data.length < 53) continue;
                 ByteBuffer ib = ByteBuffer.wrap(info.data).order(ByteOrder.LITTLE_ENDIAN);
