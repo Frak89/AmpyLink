@@ -7,8 +7,8 @@ android {
         applicationId = "com.ampylink.fusion"
         minSdk = 30          // Android 11+
         targetSdk = 34
-        versionCode = 17
-        versionName = "1.8.0"
+        versionCode = 18
+        versionName = "1.8.1"
     }
     buildTypes {
         release { isMinifyEnabled = false }

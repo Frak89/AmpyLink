@@ -18,6 +18,7 @@ public class HostService extends Service {
     static volatile String status="IDLE";
     private volatile Link link;private volatile ServerSocket listener;private volatile Socket pending;
     private MediaProjection projection;private VirtualDisplay display;private ImageReader reader;private HandlerThread capture;private Handler handler;
+    private Notification.Builder hostNotification;
     private OrbLan advertisement;
     private long last;private int width,height,physicalW,physicalH;
     @Override public IBinder onBind(Intent i){return null;}
@@ -28,8 +29,8 @@ public class HostService extends Service {
         NotificationManager nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("host","AmpyLink active session",NotificationManager.IMPORTANCE_HIGH));
         PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,HostService.class).setAction("STOP"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent open=PendingIntent.getActivity(this,2,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification n=new Notification.Builder(this,"host").setSmallIcon(android.R.drawable.ic_menu_share).setContentTitle("AmpyLink: screen sharing enabled").setContentText("Authorized local session · stop at any time").setOngoing(true).setContentIntent(open).addAction(new Notification.Action.Builder(null,"STOP SESSION",stop).build()).build();
-        startForeground(23,n,android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        hostNotification=new Notification.Builder(this,"host").setSmallIcon(android.R.drawable.ic_menu_share).setContentTitle("AmpyLink: screen sharing enabled").setContentText("In attesa del dispositivo in LAN").setOngoing(true).setContentIntent(open).addAction(new Notification.Action.Builder(null,"STOP SESSION",stop).build());
+        startForeground(23,hostNotification.build(),android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
         active=true;authenticated=false;controlAllowed=i.getBooleanExtra("control",false);status="STARTING";
         try{
             MediaProjectionManager pm=getSystemService(MediaProjectionManager.class);projection=pm.getMediaProjection(i.getIntExtra("result",Activity.RESULT_CANCELED),(Intent)i.getParcelableExtra("data"));
@@ -46,7 +47,7 @@ public class HostService extends Service {
     }
     private void serve(String code){
         try(ServerSocket s=new ServerSocket()){listener=s;s.setReuseAddress(true);s.bind(new InetSocketAddress(Link.PORT));s.setSoTimeout(120000);status="WAITING FOR PAIRING (2 min)";
-            try(Socket peer=s.accept()){pending=peer;if(!peer.getInetAddress().isSiteLocalAddress())throw new IOException("Private LAN peer required");Link l=Link.open(peer,code,true);link=l;authenticated=true;status="CONNECTED · ENCRYPTED";
+            try(Socket peer=s.accept()){pending=peer;if(!peer.getInetAddress().isSiteLocalAddress())throw new IOException("Private LAN peer required");Link l=Link.open(peer,code,true);link=l;authenticated=true;status="CONNECTED · ENCRYPTED";new Handler(Looper.getMainLooper()).post(()->{if(active&&authenticated)getSystemService(NotificationManager.class).notify(23,hostNotification.setContentText("Connesso a "+peer.getInetAddress().getHostAddress()).build());});
                 while(active){byte[] b=l.read();if(b[0]==Link.PING&&b.length==9)l.send(Link.PONG,java.util.Arrays.copyOfRange(b,1,9));else if(b[0]==Link.END)break;else if(b[0]==Link.TOUCH&&b.length==21&&controlAllowed&&TouchService.instance!=null){ByteBuffer p=ByteBuffer.wrap(b,1,20);TouchService.instance.gesture(p.getFloat(),p.getFloat(),p.getFloat(),p.getFloat(),p.getInt());}}
             }
         }catch(Exception e){if(active)status="LINK CLOSED: "+e.getClass().getSimpleName();}finally{authenticated=false;controlAllowed=false;stopSelf();}

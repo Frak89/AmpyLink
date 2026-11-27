@@ -46,3 +46,14 @@ controller. La notifica dell’host permette di interrompere la condivisione.
 Il protocollo integrato proviene da LiveSync 0.2 (JPEG, Android e client desktop
 compatibili con il protocollo v1). La ricerca automatica elenca gli host Fusion
 che annunciano il servizio. I client LiveSync precedenti possono usare l’IPv4.
+
+### Notifiche e sessioni in background (1.8.1)
+
+Su Android, il servizio in primo piano mostra gli host collegati e permette
+di interrompere le sessioni dalla notifica. Home lascia attiva la connessione.
+La notifica di condivisione sul dispositivo host mostra il peer autenticato.
+Su Windows x64 estrarre tutto lo ZIP e aprire AmpyLink-Fusion.exe. Il runtime
+Java è incluso. La X nasconde la finestra nel tray. Dal menu dell’icona si
+può riaprire la finestra, disconnettere il peer o uscire dal programma.
+Per ricompilare su Windows usare JDK 17, Go e desktop/build.ps1 con
+-RuntimePath diretto a un runtime Java 17 Windows x64.
