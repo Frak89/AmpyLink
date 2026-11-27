@@ -17,7 +17,7 @@ import java.io.FileNotFoundException;
 import java.util.Locale;
 
 public final class FileShare extends ContentProvider {
-    static final String AUTH = "com.ampylink.app.files";
+    static final String AUTH = "com.ampylink.fusion.files";
     private static final String[] DIRS = {"print", "eos", "edit"};
 
     static Uri uriFor(File f) {

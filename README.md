@@ -27,3 +27,22 @@ Ogni pacchetto è fatto così: header `[cmd, p1, p2, p3, lunghezza u32 BE]` + da
 * **Senza D8** (dx al suo posto): passa anche `DEXER="java -jar dx.jar" ASM_JAR=asm.jar`. `tools/Desugar.java` converte le lambda in classi normali, perché Android non ha `LambdaMetafactory`. Era la causa del crash all'avvio della 1.0.0.
 
 Licenza GPL v3 (deriva da AmpyRaw / RawTherapee).
+
+### AmpyLink Fusion 1.8.0
+
+Questa variante riunisce Canon EOS, galleria, editor, stampa Kodak e AmpyOrb Core
+in un APK Android 11+ con un identificativo dedicato, `com.ampylink.fusion`.
+Dalla schermata iniziale si sceglie il modulo fotografico oppure Orb.
+
+Per condividere uno schermo in LAN, aprire Orb sul telefono host e premere
+**Share this screen**. Autorizzare la cattura Android. Il servizio di
+accessibilità serve solo se si desiderano abilitare anche i gesti remoti.
+Sul controller scegliere **Cerca dispositivi Orb** oppure digitare l’IPv4,
+inserire il segreto temporaneo mostrato sull’host e premere **Connect to peer**.
+Per controllare un secondo host, scegliere **Apri un altro dispositivo**.
+Il tasto Indietro riporta alla sessione precedente. Ogni host accetta un
+controller. La notifica dell’host permette di interrompere la condivisione.
+
+Il protocollo integrato proviene da LiveSync 0.2 (JPEG, Android e client desktop
+compatibili con il protocollo v1). La ricerca automatica elenca gli host Fusion
+che annunciano il servizio. I client LiveSync precedenti possono usare l’IPv4.

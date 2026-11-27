@@ -16,11 +16,11 @@ import android.view.View;
 import android.widget.TextView;
 
 /** Cyberpunk look: neon palette, mono type, glow. */
-final class Cyber {
+public final class Cyber {
     private Cyber() {}
 
-    static final int BG = 0xFF07070C, PANEL = 0xE60B0B14, CYAN = 0xFF00F0FF, MAGENTA = 0xFFFF2BD6,
-        YELLOW = 0xFFF5FF3B, TEXT = 0xFFC8F7FF, DIM = 0xFF52606E, LINE = 0x3300F0FF;
+    static final int BG = 0xFF07070C, PANEL = 0xE60B0B14, CYAN = 0xFF54F9CC, MAGENTA = 0xFFFF2BD6,
+        YELLOW = 0xFFF5FF3B, TEXT = 0xFFC8F7FF, DIM = 0xFF91ADB2, LINE = 0x3300F0FF;
     static final Typeface MONO = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD);
 
     static int dp(Context c, float v) { return Math.round(v * c.getResources().getDisplayMetrics().density); }
@@ -40,7 +40,7 @@ final class Cyber {
     }
 
     /** Chamfered neon button. */
-    static TextView button(Context c, String s, int color) {
+    public static TextView button(Context c, String s, int color) {
         TextView t = style(new BlinkButton(c, color), s, 11, color);
         t.setGravity(Gravity.CENTER);
         int ph = dp(c, 10), pv = dp(c, 8);
