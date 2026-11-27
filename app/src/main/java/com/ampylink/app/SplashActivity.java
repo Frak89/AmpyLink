@@ -37,7 +37,7 @@ public final class SplashActivity extends Activity {
     private void go() {
         if (done) return;
         done = true;
-        startActivity(new Intent(this, GalleryActivity.class));
+        startActivity(new Intent(this, DeviceHubActivity.class));
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         finish();
     }
@@ -93,7 +93,7 @@ public final class SplashActivity extends Activity {
             c.drawLine(cx - lw, cy + Cyber.dp(getContext(), 30), cx + lw, cy + Cyber.dp(getContext(), 30), line);
             float subT = Math.min(1f, Math.max(0f, (t - 0.45f) / 0.4f));
             sub.setAlpha((int) (255 * subT));
-            c.drawText(Fx.decode("CANON EOS ▸ WIFI · BT ▸ KODAK MINI 2 RETRO", subT, r), cx, cy + Cyber.dp(getContext(), 52), sub);
+            c.drawText(Fx.decode("CANON EOS · KODAK · AMPYORB LAN", subT, r), cx, cy + Cyber.dp(getContext(), 52), sub);
             sub.setColor(Cyber.MAGENTA); sub.setAlpha((int) (200 * subT));
             c.drawText("POWERED BY AMPY▲RAW GPU ENGINE", cx, cy + Cyber.dp(getContext(), 70), sub);
             sub.setColor(Cyber.DIM);

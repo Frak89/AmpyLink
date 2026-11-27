@@ -4,11 +4,11 @@ android {
     namespace = "com.ampylink.app"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.ampylink.app"
+        applicationId = "com.ampylink.fusion"
         minSdk = 30          // Android 11+
         targetSdk = 34
-        versionCode = 16
-        versionName = "1.7.0"
+        versionCode = 17
+        versionName = "1.8.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
